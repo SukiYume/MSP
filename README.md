@@ -1,8 +1,8 @@
 <div align="center">
 
-# Methods for Sonifying Pulse (MSP)
-
 <div align="center"><img src="Figure/Burst.png" alt="RMS" width="140px" /></div>
+
+# Methods for Sonifying Pulse (MSP)
 
 _✨ Sonifying a radio pulse ✨_  
 
