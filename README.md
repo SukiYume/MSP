@@ -1,6 +1,6 @@
 <div align="center">
 
-<div align="center"><img src="Figure/Burst.png" alt="RMS" width="140px" /></div>
+<div align="center"><img style="border-radius:50%;border: royalblue dashed 1px;padding: 5px" src="Figure/Burst.png" alt="RMS" width="140px" /></div>
 
 # Methods for Sonifying Pulse (MSP)
 
@@ -9,7 +9,7 @@ _✨ Sonifying a radio pulse ✨_
 </div>
 
 <p align="center">
-  <a href="https://github.com/SukiYume/RMS">
+  <a href="https://github.com/SukiYume/MSP">
     <img src="https://img.shields.io/badge/MethodSonifyPulse-MSP-royalblue" alt="release">
   </a>
 </p>
