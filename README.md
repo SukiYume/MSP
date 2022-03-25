@@ -34,4 +34,8 @@ _✨ Sonifying a radio pulse ✨_
 
   <p align="center" color='RoyalBlue'> - </p>
 
-  第三种就是使用短时逆傅立叶变换。前面我们提到数据的相位信息已经丢掉，无法恢复成原始数据。但是我们可以假设一个相位信息，强行做`ISTFT`。这样得到的音频在`Au`中打开看频谱就是类似题图这样的东西。
+  第三种就是使用短时逆傅立叶变换。前面我们提到数据的相位信息已经丢掉，无法恢复成原始数据。但是我们可以假设一个相位信息，做`ISTFT`。像下图中例子：
+
+  <div align="center"><img src="Figure/MelSpecWav.png" alt="RMS" width="500px" /></div>
+
+  左边是原始数据在时间-频率空间中的表现，右边是`Audition`显示的结果，右上是Wave轮廓，右下是Au的频谱。由于人耳对于声音的感应是对数的，因此轮廓经过了对数映射。
