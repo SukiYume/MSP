@@ -34,7 +34,11 @@ _✨ Sonifying a radio pulse ✨_
 
   <p align="center" color='RoyalBlue'> - </p>
 
-  第三种就是使用短时逆傅立叶变换。前面我们提到数据的相位信息已经丢掉，无法恢复成原始数据。但是我们可以假设一个相位信息，做`ISTFT`。像下图中例子：
+  第三种是脉冲轮廓对应响度。
+
+  <p align="center" color='RoyalBlue'> - </p>
+
+  第四种就是使用短时逆傅立叶变换。前面我们提到数据的相位信息已经丢掉，无法恢复成原始数据。但是我们可以假设一个相位信息，做`ISTFT`。像下图中例子：
 
   <div align="center"><img src="Figure/MelSpecWav.png" alt="RMS" width="500px" /></div>
 
