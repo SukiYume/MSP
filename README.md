@@ -24,22 +24,28 @@ _✨ Sonifying a radio pulse ✨_
 
   <p align="center" color='RoyalBlue'> - </p>
 
-  第一种是使用`astronify`，这是一个将光变曲线声化的python库。先将我们的数据沿着频率轴做平均，只留脉冲轮廓。之后`astronify`可以将轮廓强度映射到音高，并写成音频文件。
+  第一种是使用`astronify`，这是一个将光变曲线声化的python库。例子在`0-astronify.py`中。
 
-  但其实我不太喜欢这种写法，写出来的声音有些奇怪，并且对参数要求很高，更适合光学波段的光变曲线。
-
-  <p align="center" color='RoyalBlue'> - </p>
-
-  第二种是直接将脉冲轮廓写入Wave文件。这种写法对不同数据写出来的音频听起来大差不差，因此可以将不同乐器的音频与脉冲轮廓卷积，以实现不同的音色。
+  先将我们的数据沿着频率轴做平均，只留脉冲轮廓。之后`astronify`可以将轮廓强度映射到音高，并写成音频文件。但其实我不太喜欢这种写法，写出来的声音有些奇怪，并且对参数要求很高，更适合光学波段的光变曲线（比较平滑的那种）。
 
   <p align="center" color='RoyalBlue'> - </p>
 
-  第三种是脉冲轮廓对应响度。
+  第二种是直接将脉冲轮廓写入Wave文件。例子在`1-profile2wave.py`中。
+  
+  这种写法对不同数据写出来的音频听起来大差不差，因此可以将不同乐器的音频与脉冲轮廓卷积，以实现不同的音色。
 
   <p align="center" color='RoyalBlue'> - </p>
 
-  第四种就是使用短时逆傅立叶变换。前面我们提到数据的相位信息已经丢掉，无法恢复成原始数据。但是我们可以假设一个相位信息，做`ISTFT`。像下图中例子：
+  第三种是脉冲轮廓对应响度。例子在`2-amp2loud.py`中。
+
+  <p align="center" color='RoyalBlue'> - </p>
+
+  第四种就是使用声码器（Vocoder）。例子在`3-griffinlim.py`和`4-hifi-gan.py`中。
+
+  前面我们提到数据的相位信息已经丢掉，无法恢复成原始数据。但是我们可以假设一个相位信息，做`ISTFT`。也即将时间-频率数据作为Mel声谱，据此还原音频。传统的比较好用的是`griffin_lim`声码器，它假设了一个初始相位，通过迭代，是还原出来音频的Mel声谱接近提供的Mel声谱。
+
+  随着深度学习技术的发展，TTS逐渐成熟。除了端到端的TTS，还有二阶段TTS，也即先通过文字生成Mel声谱，再将Mel声谱转换为声音。第二阶段也会用到类似的声码器。`Neural Vocoder`也从最初的`WaveNet`、`WaveRNN`、`UnivNet`，到现在的`HiFi-GAN`和`BigVGAN`。这里用的是`HiFi-GAN`已经预训练好的`Universal V1`模型，在[BigVGAN](https://bigvgan-demo.github.io/)的音频例子中，可以看到，`HiFi-GAN`对于器乐还原的效果还不错，是可用的状态。在我们的数据上做测试呢，效果也还可以。之后可能会再微调一下模型，生成一些简单的三角波音乐。关于[HiFi-GAN](https://github.com/jik876/hifi-gan)的更多细节，可以查看官方的repo。
+  
+  如下图中例子，左边是原始数据在时间-频率空间中的表现，右边是`Audition`显示的结果，右上是Wave轮廓，右下是Au的频谱。由于人耳对于声音的感应是对数的，因此轮廓经过了对数映射。
 
   <div align="center"><img src="Figure/MelSpecWav.png" alt="RMS" width="500px" /></div>
-
-  左边是原始数据在时间-频率空间中的表现，右边是`Audition`显示的结果，右上是Wave轮廓，右下是Au的频谱。由于人耳对于声音的感应是对数的，因此轮廓经过了对数映射。
