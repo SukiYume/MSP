@@ -56,13 +56,18 @@ if __name__ == '__main__':
 
     data_path   = 'Data/RawBurst.npy'
     save_path   = './RawBurst_Generated.wav'
-    config_path = 'HiFiGAN/UniversalV1/config.json'
-    checkpoint_path = 'HiFiGAN/UniversalV1/g_02500000'
-    
+    config_path = 'HiFiGAN/model/config.json'
+    checkpoint_path = 'HiFiGAN/model/g_03000000'
+
     ###### 消色散前的爆发，0-axis是时间，1-axis是频率 ######
-    data     = np.load(data_path)
-    data     = np.mean(data.reshape(128, 22, 512, 8), axis=(1, 3))
-    data     = rescale_data(data)
+    data = np.load(data_path)
+    data = np.mean(data.reshape(128, 22, 512, 8), axis=(1, 3))
+    data = rescale_data(data)
+
+    ###### ParkesBurst.npy 0-axis是频率，1-axis是时间 ######
+    data = np.load('./Data/ParkesBurst.npy').T[:, ::-1]
+    data = np.mean(data.reshape(data.shape[0], data.shape[1]//4, 4), axis=2)
+    data = rescale_data(data)
 
     ###### HiFiGAN Mel to Wav ######
     wave, sr = generate_wav(data)
