@@ -43,6 +43,7 @@ if __name__ == '__main__':
         sound_norm = sounds / L
 
         # 卷积
-        wave_raw   = (signal.convolve(wave_raw, sound_norm, mode='same') / 10).astype(np.int16)
+        wave_raw   = signal.convolve(wave_raw, sound_norm, mode='same')
+        wave_raw   = ((wave_raw - np.min(wave_raw)) / (np.max(wave_raw) - np.min(wave_raw)) * 3e4).astype(np.int16)
     
     write('Audio.wav', sample_rate, wave_raw)
