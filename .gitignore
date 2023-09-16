@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 do_03000000
+*.ipynb
 
 # C extensions
 *.so

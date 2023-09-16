@@ -61,5 +61,5 @@ if __name__ == '__main__':
         decoder_id      = 2,
         checkpoint_type = 'bestmodel',
         file_path       = './Data/Burst-wirfi.wav',
-        rate            = 16000 # 48000 # 16000
+        rate            = 48000 # 16000
     )

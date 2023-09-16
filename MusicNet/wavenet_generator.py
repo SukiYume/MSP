@@ -101,10 +101,10 @@ class WavenetGenerator(nn.Module):
     @staticmethod
     def softmax_and_sample(prediction, method='sample'):
         if method == 'sample':
-            probabilities = F.softmax(prediction, dim=-1)
+            probabilities = F.softmax(prediction, dim=1)
             samples = torch.multinomial(probabilities, 1)
         elif method == 'max':
-            _, samples = torch.max(F.softmax(prediction, dim=-1), dim=1)
+            _, samples = torch.max(F.softmax(prediction, dim=1), dim=1)
         else:
             assert False, "Method not supported."
 

@@ -74,9 +74,9 @@ _✨ Sonifying a radio pulse ✨_
 
   在`HiFi-GAN`的`UniversalV1`模型基础上，我们使用500首交响乐曲对模型进行微调，继续训练了500k步，模型放在`HiFiGAN/model`中。新模型在我们的数据上做测试，效果也还可以。
 
-  如下图中例子，左边是原始数据在时间-频率空间中的表现，右边是`Audition`显示的结果，右上是Wave轮廓，右下是Au的频谱。由于人耳对于声音的感应是对数的，因此轮廓经过了对数映射。
+  如下图中例子，左边是原始数据在时间-频率空间中的表现，右边转换到音频后短时傅里叶变换的结果。由于人耳对于声音的感应是对数的，因此轮廓经过了对数映射。
 
-  <div align="center"><img src="Figure/MSPT.png" alt="RMS" width="600px" /></div>
+  <div align="center"><img src="Figure/MSPT.png" alt="RMS" width="800px" /></div>
 
   </div>
   </details>
@@ -91,12 +91,10 @@ _✨ Sonifying a radio pulse ✨_
   例子在`5-musicnet.py`中。或许不算一种新的方法，只是对输出的音乐进行风格迁移。使用的是[A Universal Music Translation Network](https://arxiv.org/abs/1805.07848)中的[模型](https://github.com/facebookresearch/music-translation)。
 
   他们提供了5个预训练模型，对应的风格分别是
-  - **0**, 'Accompanied Violin', 'Beethoven'
-  - **1**, 'Solo Cello', 'Bach'
-  - **2**, 'Solo Piano', 'Bach'
-  - **3**, 'Solo Piano', 'Beethoven'
-  - **4**, 'String Quartet', 'Beethoven'
-  - **5**, 'Wind Quintet', 'Cambini'
+  | 序号   | 0         | 1        | 2           | 3           | 4             | 5           |
+  | ---   | ---------- | -------- | --------- | ----------- | ------------- | ----------- |
+  | 乐器   | 伴奏小提琴 | 独奏大提琴 | 独奏钢琴   | 独奏钢琴   | 弦乐四重奏     | 管风琴五重奏 |
+  | 作曲家 | 贝多芬     | 巴赫      | 巴赫       | 贝多芬     | 贝多芬       | 卡姆比尼   |
 
   </div>
   </details>
