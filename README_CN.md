@@ -82,12 +82,7 @@ _✨ Sonifying a radio pulse ✨_
 
   <div align="center"><img src="Figure/MSPT.png" alt="RMS" width="800px" /></div>
 
-  <p align="center">下面是转换后的音频示例。</p>
-  <p align="center">
-  <audio controls>
-    <source src="Data/Burst-wirfi.wav" type="audio/wav">
-  </audio>
-  </p>
+  [Data/Burst-wirfi.wav](Data/Burst-wirfi.wav) 是转换后的音频示例。</p>
 
   </div>
   </details>
