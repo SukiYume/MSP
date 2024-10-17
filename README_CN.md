@@ -15,7 +15,7 @@ _✨ Sonifying a radio pulse ✨_
 </p>
 
 <p align="center">
-  <a href="./README_CN.md" target="_blank">English README</a>
+  <a href="./README.md" target="_blank">English README</a>
 </p>
 
 ## Description
