@@ -82,9 +82,10 @@ In the example below, the left image shows the original data in the time-frequen
 <p align="center">Below is a sample of the converted audio.</p>
 <p align="center">
 <audio controls>
-  <source src="Data/Burst-wirfi.wav" type="audio/mpeg">
+  <source src="Data/Burst-wirfi.wav" type="audio/wav">
 </audio>
 </p>
+
 
 </div>
 </details>

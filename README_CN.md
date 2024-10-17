@@ -85,7 +85,7 @@ _✨ Sonifying a radio pulse ✨_
   <p align="center">下面是转换后的音频示例。</p>
   <p align="center">
   <audio controls>
-    <source src="Data/Burst-wirfi.wav" type="audio/mpeg">
+    <source src="Data/Burst-wirfi.wav" type="audio/wav">
   </audio>
   </p>
 
