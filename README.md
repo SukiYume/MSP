@@ -80,11 +80,8 @@ In the example below, the left image shows the original data in the time-frequen
 <div align="center"><img src="Figure/MSPT.png" alt="RMS" width="800px" /></div>
 
 <p align="center">Below is a sample of the converted audio.</p>
-<p align="center">
-<audio controls>
-  <source src="Data/Burst-wirfi.wav" type="audio/wav">
-</audio>
-</p>
+
+https://raw.githubusercontent.com/SukiYume/MSP/refs/heads/main/Data/Burst-wirfi.wav
 
 
 </div>
