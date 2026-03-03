@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "astrosonify"
+version = "0.1.0"
+description = "Methods for Sonifying Pulse - Convert radio telescope data into audible sound"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "XiaoQing", email = ""},
+]
+keywords = ["astronomy", "sonification", "radio-pulse", "audio", "FRB"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "librosa",
+    "soundfile",
+    "huggingface_hub",
+    "click",
+]
+
+[project.optional-dependencies]
+astronify = ["astropy", "astronify"]
+hifigan = ["torch", "scikit-image"]
+musicnet = ["torch", "tqdm"]
+all = ["astropy", "astronify", "torch", "scikit-image", "tqdm"]
+dev = ["pytest", "pytest-cov"]
+
+[project.scripts]
+astrosonify = "astrosonify.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/SukiYume/MSP"
+Repository = "https://github.com/SukiYume/MSP"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/astrosonify"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/astrosonify"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
