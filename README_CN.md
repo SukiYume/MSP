@@ -1,6 +1,6 @@
 <div align="center">
 
-<div align="center"><img style="border-radius:50%;border: royalblue dashed 1px;padding: 5px" src="Figure/Burst.png" alt="RMS" width="140px" /></div>
+<div align="center"><img style="border-radius:50%;border: royalblue dashed 1px;padding: 5px" src="assets/Burst.png" alt="RMS" width="140px" /></div>
 
 # AstroSonify
 
@@ -119,7 +119,7 @@ astrosonify download-examples --dest ./data/
 
 ### 声码器对比
 
-<div align="center"><img src="Figure/MSPT.png" alt="时频谱对比" width="800px" /></div>
+<div align="center"><img src="assets/MSPT.png" alt="时频谱对比" width="800px" /></div>
 
 左：原始时频数据。右：经声码器转换后重建的时频谱。
 

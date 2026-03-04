@@ -1,6 +1,6 @@
 <div align="center">
 
-<div align="center"><img style="border-radius:50%;border: royalblue dashed 1px;padding: 5px" src="Figure/Burst.png" alt="RMS" width="140px" /></div>
+<div align="center"><img style="border-radius:50%;border: royalblue dashed 1px;padding: 5px" src="assets/Burst.png" alt="RMS" width="140px" /></div>
 
 # AstroSonify
 
@@ -119,7 +119,7 @@ All methods return `(audio_array, sample_rate)` tuple.
 
 ### Vocoder Comparison
 
-<div align="center"><img src="Figure/MSPT.png" alt="Spectrogram comparison" width="800px" /></div>
+<div align="center"><img src="assets/MSPT.png" alt="Spectrogram comparison" width="800px" /></div>
 
 Left: original time-frequency data. Right: reconstructed spectrogram after vocoder conversion.
 
