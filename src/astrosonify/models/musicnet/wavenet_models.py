@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 #
 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -17,7 +18,7 @@ class DilatedResConv(nn.Module):
         if activation == 'relu':
             self.activation = lambda *args, **kwargs: F.relu(*args, **kwargs, inplace=True)
         elif activation == 'tanh':
-            self.activation = F.tanh
+            self.activation = torch.tanh
         elif activation == 'glu':
             self.activation = F.glu
             in_channels = channels // 2

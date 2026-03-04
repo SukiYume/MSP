@@ -36,12 +36,21 @@ def _rescale_data(data: np.ndarray, resize_fn) -> np.ndarray:
     data = resize_fn(data, (data.shape[0], 80))
     data = normalize(data)
     h, w = data.shape
-    a = np.histogram(data.flatten(), bins=max(int(h * w / 100), 1))
+    # Parameters below follow original model preprocessing convention.
+    # They are preserved for compatibility with the released checkpoint.
+    a = np.histogram(data.ravel(), bins=max(int(h * w / 100), 1))
     b, c = (a[1][1:] + a[1][:-1]) / 2, a[0]
     d = 0.6 - b[np.argmax(c)]
     data = (data + d) * 12 - 10.5
     data = np.clip(data, -11, 1.6)
     return data.T[np.newaxis, :, :]  # (1, 80, T)
+
+
+def _torch_load_state_dict(torch, checkpoint_path: str, device):
+    try:
+        return torch.load(checkpoint_path, map_location=device, weights_only=True)
+    except TypeError:
+        return torch.load(checkpoint_path, map_location=device)
 
 
 def hifigan(
@@ -101,7 +110,7 @@ def hifigan(
         torch.cuda.manual_seed(h.seed)
 
     generator = Generator(h).to(device)
-    state_dict = torch.load(checkpoint_path, map_location=device)
+    state_dict = _torch_load_state_dict(torch, checkpoint_path, device)
     generator.load_state_dict(state_dict["generator"])
     generator.eval()
     generator.remove_weight_norm()

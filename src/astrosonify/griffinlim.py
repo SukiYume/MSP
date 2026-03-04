@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import numpy as np
 import librosa
 from scipy import signal as scipy_signal
@@ -25,7 +24,7 @@ def _griffin_lim(
     hop_length: int,
     win_length: int,
 ) -> np.ndarray:
-    X_best = copy.deepcopy(spectrogram)
+    X_best = spectrogram.copy()
     for _ in range(n_iter):
         X_t = librosa.istft(X_best, n_fft=n_fft, hop_length=hop_length, win_length=win_length, window="hann")
         est = librosa.stft(X_t, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
@@ -63,7 +62,7 @@ def griffinlim(
         n_mels: Number of mel filter banks.
         n_fft: FFT size.
         frame_length: Frame length in seconds.
-        preemphasis: Pre-emphasis coefficient. 0 to disable.
+        preemphasis: De-emphasis coefficient used in post-filtering. 0 to disable.
         max_db: Maximum dB for denormalization.
         ref_db: Reference dB for denormalization.
         time_rebin: Rebin time axis. None = auto.

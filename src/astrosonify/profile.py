@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import wave as wave_module
 import numpy as np
+import soundfile as sf
 from scipy import stats, signal, interpolate
 
 from .core import to_profile, normalize, save_audio
@@ -11,13 +11,9 @@ from .hub import get_instrument_path
 
 
 def _read_wave(file: str) -> np.ndarray:
-    """Read a WAV file and return the first channel as int16 array."""
-    with wave_module.open(file, "rb") as f:
-        nchannels, sampwidth, framerate, nframes = f.getparams()[:4]
-        str_data = f.readframes(nframes)
-    wave_data = np.frombuffer(str_data, dtype=np.short)
-    wave_data = wave_data.reshape(-1, nchannels)
-    return wave_data[:, 0]
+    """Read a WAV file and return mono float waveform."""
+    wave_data, _ = sf.read(file, always_2d=True)
+    return wave_data[:, 0].astype(np.float64)
 
 
 def profile_to_wave(

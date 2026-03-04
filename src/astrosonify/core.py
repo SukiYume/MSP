@@ -52,6 +52,19 @@ def rebin_spectrogram(
         raise ValueError("rebin_spectrogram requires 2D input array")
 
     result = data.astype(np.float64)
+    t0, f0 = result.shape
+
+    if time_bins is not None:
+        if time_bins <= 0:
+            raise ValueError("time_bins must be a positive integer")
+        if time_bins > t0:
+            raise ValueError(f"time_bins ({time_bins}) cannot exceed input time dimension ({t0})")
+
+    if freq_bins is not None:
+        if freq_bins <= 0:
+            raise ValueError("freq_bins must be a positive integer")
+        if freq_bins > f0:
+            raise ValueError(f"freq_bins ({freq_bins}) cannot exceed input frequency dimension ({f0})")
 
     if time_bins is not None and time_bins != result.shape[0]:
         t = result.shape[0]

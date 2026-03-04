@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "astrosonify"
-version = "0.1.0"
+version = "0.1.1"
 description = "Methods for Sonifying Pulse - Convert radio telescope data into audible sound"
 readme = "README.md"
 license = {text = "MIT"}
@@ -53,6 +53,9 @@ include = ["src/astrosonify"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/astrosonify"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/astrosonify/py.typed" = "astrosonify/py.typed"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

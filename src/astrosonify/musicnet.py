@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 import platform
 import numpy as np
-from scipy.io import wavfile
+from pathlib import Path
 
 from .core import save_audio
 from .hub import get_model_path
@@ -44,7 +44,7 @@ STYLE_NAMES = {
 
 
 def musicnet(
-    input_audio,
+    input_audio: str | Path | np.ndarray,
     decoder_id: int = 2,
     checkpoint_type: str = "bestmodel",
     sr: int = 48000,
@@ -70,13 +70,18 @@ def musicnet(
         Tuple of (audio_array, sample_rate).
     """
     torch = _require_torch()
-    tqdm_mod = _require_tqdm()
+    _require_tqdm()
     import librosa
 
     if decoder_id not in range(6):
         raise ValueError(f"decoder_id must be 0-5. Available styles: {STYLE_NAMES}")
     if checkpoint_type not in ("bestmodel", "lastmodel"):
         raise ValueError("checkpoint_type must be 'bestmodel' or 'lastmodel'")
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "musicnet requires a CUDA-capable GPU. "
+            "No CUDA device detected in current environment."
+        )
 
     # Handle Windows PosixPath issue with torch.load
     posix_backup = None
@@ -102,7 +107,10 @@ def musicnet(
         model_args = argparse.Namespace(**args_data["args"])
 
         encoder = wavenet_models.Encoder(model_args)
-        state = torch.load(checkpoint_path, map_location="cpu")
+        try:
+            state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        except TypeError:
+            state = torch.load(checkpoint_path, map_location="cpu")
         encoder.load_state_dict(state["encoder_state"])
         encoder.eval()
         encoder = encoder.cuda()
@@ -129,7 +137,7 @@ def musicnet(
                 splits = torch.split(zz_batch, split_size, -1)
                 audio_data = []
                 decoder.reset()
-                for cond in tqdm_mod.tqdm(splits, desc="Generating"):
+                for cond in splits:
                     audio_data.append(decoder.generate(cond).cpu())
                 audio_data = torch.cat(audio_data, -1)
                 audio_res.append(audio_data)

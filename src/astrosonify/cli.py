@@ -29,7 +29,7 @@ def list_methods():
 
 
 @main.command()
-@click.option("--input", "input_path", required=True, help="Input .npy file")
+@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
 @click.option("--sr", default=48000, help="Sample rate (Hz)")
 @click.option("--duration", default=10.0, help="Duration (seconds)")
@@ -48,7 +48,26 @@ def profile(input_path, output_path, sr, duration, repeat, instrument, no_instru
 
 
 @main.command()
-@click.option("--input", "input_path", required=True, help="Input .npy file")
+@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
+@click.option("--output", "output_path", required=True, help="Output .wav file")
+@click.option("--note-spacing", default=0.01, type=float, help="Seconds between notes")
+@click.option("--downsample", default=10, type=int, help="Time downsample factor")
+def astronify(input_path, output_path, note_spacing, downsample):
+    """Sonify using astronify pitch mapping (Method 0)."""
+    from .astronify_method import astronify_sonify
+
+    data = np.load(input_path)
+    astronify_sonify(
+        data,
+        note_spacing=note_spacing,
+        time_downsample=downsample,
+        output=output_path,
+    )
+    click.echo(f"Saved to {output_path}")
+
+
+@main.command()
+@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
 @click.option("--sr", default=48000, help="Sample rate (Hz)")
 @click.option("--duration", default=2.0, help="Duration (seconds)")
@@ -64,7 +83,7 @@ def amplitude(input_path, output_path, sr, duration, freq, downsample):
 
 
 @main.command()
-@click.option("--input", "input_path", required=True, help="Input .npy file")
+@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
 @click.option("--sr", default=48000, help="Sample rate (Hz)")
 @click.option("--n-iter", default=200, help="Griffin-Lim iterations")
@@ -83,7 +102,7 @@ def griffinlim(input_path, output_path, sr, n_iter, n_mels, n_fft, time_rebin, f
 
 
 @main.command()
-@click.option("--input", "input_path", required=True, help="Input .npy file")
+@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
 @click.option("--time-rebin", default=None, type=int, help="Time downsample bins")
 @click.option("--clean", is_flag=True, help="Apply burst cleaning")
@@ -96,7 +115,7 @@ def hifigan(input_path, output_path, time_rebin, clean):
 
 
 @main.command()
-@click.option("--input", "input_path", required=True, help="Input .wav file")
+@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .wav file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
 @click.option("--decoder-id", default=2, type=int, help="Style decoder (0-5)")
 @click.option("--checkpoint-type", default="bestmodel", help="bestmodel or lastmodel")

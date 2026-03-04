@@ -65,6 +65,23 @@ class TestRebinSpectrogram:
         with pytest.raises(ValueError, match="2D"):
             rebin_spectrogram(np.ones(10), time_bins=5)
 
+    def test_rejects_upsample_time(self):
+        data = np.ones((10, 20))
+        with pytest.raises(ValueError, match="time_bins"):
+            rebin_spectrogram(data, time_bins=11)
+
+    def test_rejects_upsample_freq(self):
+        data = np.ones((10, 20))
+        with pytest.raises(ValueError, match="freq_bins"):
+            rebin_spectrogram(data, freq_bins=21)
+
+    def test_rejects_non_positive_bins(self):
+        data = np.ones((10, 20))
+        with pytest.raises(ValueError, match="positive"):
+            rebin_spectrogram(data, time_bins=0)
+        with pytest.raises(ValueError, match="positive"):
+            rebin_spectrogram(data, freq_bins=-1)
+
 
 class TestToProfile:
     def test_2d_to_1d(self):

@@ -34,14 +34,20 @@ def amplitude_modulate(
         (profile - profile.min()) / (profile.max() - profile.min() + 1e-10) + 1
     )
 
-    n_samples = int(sr * duration)
-    x_orig = np.linspace(0, 2 * np.pi, len(profile))
-    f_interp = interp1d(x_orig, profile)
-    x_new = np.linspace(x_orig[0], x_orig[-1], n_samples)
-    envelope = f_interp(x_new)
+    if duration <= 0:
+        raise ValueError("duration must be > 0")
 
-    carrier = np.sin(freq * x_new)
-    audio = envelope * carrier + envelope
+    n_samples = int(sr * duration)
+    if n_samples <= 0:
+        raise ValueError("duration and sr produce zero output samples")
+
+    t_orig = np.linspace(0.0, duration, len(profile), endpoint=False)
+    t = np.linspace(0.0, duration, n_samples, endpoint=False)
+    f_interp = interp1d(t_orig, profile, bounds_error=False, fill_value=(profile[0], profile[-1]))
+    envelope = f_interp(t)
+
+    carrier = np.sin(2.0 * np.pi * freq * t)
+    audio = envelope * carrier
 
     peak = np.max(np.abs(audio))
     if peak > 0:

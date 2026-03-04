@@ -7,7 +7,10 @@ import numpy as np
 from huggingface_hub import hf_hub_download
 
 REPO_ID = "TorchLight/astrosonify"
-CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "astrosonify")
+CACHE_DIR = os.environ.get(
+    "ASTROSONIFY_CACHE_DIR",
+    os.path.join(os.path.expanduser("~"), ".cache", "astrosonify"),
+)
 
 EXAMPLE_MAP = {
     "burst": "Burst.npy",

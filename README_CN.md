@@ -30,6 +30,15 @@ _多种方法声化射电脉冲_
 
 **AstroSonify** 提供 6 种方法将这类无相位的时频数据转换为可听声音，从简单的轮廓映射到神经声码器重建。
 
+## 更新内容（v0.1.1）
+
+- 修复 `rebin_spectrogram()` 在目标 bin 超过输入尺寸时的崩溃问题。
+- 修正 `amplitude_modulate(freq=...)` 的频率语义，使 `freq` 直接对应物理 Hz。
+- 在 `musicnet()` 中增加 CUDA 可用性显式检查。
+- 模型加载在支持时使用更安全的 `torch.load(..., weights_only=True)`。
+- CLI 新增 `astrosonify astronify`（方法 0）子命令。
+- 新增缓存目录环境变量 `ASTROSONIFY_CACHE_DIR`。
+
 ## 安装
 
 ```bash
@@ -91,12 +100,17 @@ astrosonify griffinlim --input burst.npy --output burst.wav --sr 48000
 # 使用轮廓方法声化
 astrosonify profile --input burst.npy --output profile.wav --instrument violin
 
+# 使用 astronify 音高映射声化
+astrosonify astronify --input profile.npy --output astronify.wav --note-spacing 0.02 --downsample 5
+
 # 使用振幅调制声化
 astrosonify amplitude --input profile.npy --output amp.wav --freq 1000
 
 # 下载示例数据
 astrosonify download-examples --dest ./data/
 ```
+
+现在 CLI 中所有命令的 `--input` 都会进行路径存在性校验，错误提示更友好。
 
 ## 方法列表
 
@@ -180,6 +194,26 @@ astrosonify download-examples --dest ./data/
 ## 数据与模型
 
 示例数据和预训练模型托管在 [Hugging Face Hub](https://huggingface.co/TorchLight/astrosonify)，首次使用时自动下载。
+
+### 缓存目录
+
+默认缓存目录是 `~/.cache/astrosonify`。
+
+你可以通过环境变量覆盖：
+
+```bash
+export ASTROSONIFY_CACHE_DIR=/path/to/cache
+```
+
+Windows PowerShell：
+
+```powershell
+$env:ASTROSONIFY_CACHE_DIR = "D:\\astrosonify-cache"
+```
+
+### 模型加载安全说明
+
+本项目从 Hugging Face Hub 官方仓库下载模型权重。加载时在可用版本上优先使用更安全的 weights-only 路径（`torch.load(..., weights_only=True)`），并对旧版 PyTorch 保持兼容回退。
 
 原始独立脚本和数据文件请查看 [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy/original-scripts) 分支。
 

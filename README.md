@@ -30,6 +30,15 @@ Radio telescopes digitize and record electromagnetic signals, but the received f
 
 **AstroSonify** provides 6 methods to convert such phase-less time-frequency data into audible sound, ranging from simple profile mapping to neural vocoder reconstruction.
 
+## What's New (v0.1.1)
+
+- Fixed `rebin_spectrogram()` edge-case crashes when target bins exceed input dimensions.
+- Corrected `amplitude_modulate(freq=...)` to map `freq` directly to physical Hz.
+- Added explicit CUDA availability check in `musicnet()`.
+- Added safer model loading path using `torch.load(..., weights_only=True)` when supported.
+- Added CLI subcommand `astrosonify astronify` (method 0).
+- Added cache-dir override support with `ASTROSONIFY_CACHE_DIR`.
+
 ## Installation
 
 ```bash
@@ -91,12 +100,17 @@ astrosonify griffinlim --input burst.npy --output burst.wav --sr 48000
 # Sonify with profile method
 astrosonify profile --input burst.npy --output profile.wav --instrument violin
 
+# Sonify with astronify pitch mapping
+astrosonify astronify --input profile.npy --output astronify.wav --note-spacing 0.02 --downsample 5
+
 # Sonify with amplitude modulation
 astrosonify amplitude --input profile.npy --output amp.wav --freq 1000
 
 # Download example data
 astrosonify download-examples --dest ./data/
 ```
+
+All `--input` paths in CLI commands now use existence validation for clearer user-facing errors.
 
 ## Methods
 
@@ -180,6 +194,26 @@ Left: original time-frequency data. Right: reconstructed spectrogram after vocod
 ## Data & Models
 
 Example data and pre-trained models are hosted on [Hugging Face Hub](https://huggingface.co/TorchLight/astrosonify) and downloaded automatically on first use.
+
+### Cache directory
+
+By default, files are cached under `~/.cache/astrosonify`.
+
+You can override this with:
+
+```bash
+export ASTROSONIFY_CACHE_DIR=/path/to/cache
+```
+
+Windows PowerShell:
+
+```powershell
+$env:ASTROSONIFY_CACHE_DIR = "D:\\astrosonify-cache"
+```
+
+### Trust & safety note for model files
+
+This project downloads model checkpoints from the official repository on Hugging Face Hub. Loading uses a safer weights-only path where available (`torch.load(..., weights_only=True)`), with backward-compatible fallback for older PyTorch versions.
 
 For the original standalone scripts and data files, see the [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy/original-scripts) branch.
 

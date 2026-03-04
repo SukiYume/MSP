@@ -26,3 +26,13 @@ class TestAmplitudeModulate:
         out = tmp_path / "out.wav"
         audio, sr = amplitude_modulate(data, sr=48000, duration=1, output=str(out))
         assert out.exists()
+
+    def test_freq_zero_returns_finite_audio(self):
+        data = np.random.default_rng(42).random(100)
+        audio, _ = amplitude_modulate(data, sr=48000, duration=1, freq=0.0)
+        assert np.all(np.isfinite(audio))
+
+    def test_invalid_duration_raises(self):
+        data = np.random.default_rng(42).random(100)
+        with pytest.raises(ValueError, match="duration"):
+            amplitude_modulate(data, duration=0)

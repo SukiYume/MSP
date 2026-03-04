@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import numpy as np
+import soundfile as sf
 
 from .core import to_profile, save_audio
 
@@ -55,18 +58,18 @@ def astronify_sonify(
     soni.note_spacing = note_spacing
     soni.sonify()
 
-    if output is not None:
-        soni.write(output)
-
-    # Extract audio data from astronify's internal representation
-    import tempfile, os, soundfile as sf
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp_path = tmp.name
-    tmp.close()
+    # Extract audio data from astronify's generated waveform via temp WAV.
+    fd, tmp_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
     try:
         soni.write(tmp_path)
         audio, sr = sf.read(tmp_path)
     finally:
         os.unlink(tmp_path)
 
-    return audio.astype(np.float32), sr
+    audio = audio.astype(np.float32)
+
+    if output is not None:
+        save_audio(audio, sr, output)
+
+    return audio, sr
