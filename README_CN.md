@@ -2,15 +2,21 @@
 
 <div align="center"><img style="border-radius:50%;border: royalblue dashed 1px;padding: 5px" src="Figure/Burst.png" alt="RMS" width="140px" /></div>
 
-# Methods for Sonifying Pulse (MSP)
+# AstroSonify
 
-_✨ Sonifying a radio pulse ✨_
+_多种方法声化射电脉冲_
 
 </div>
 
 <p align="center">
+  <a href="https://pypi.org/project/astrosonify/">
+    <img src="https://img.shields.io/pypi/v/astrosonify?color=royalblue" alt="PyPI">
+  </a>
   <a href="https://github.com/SukiYume/MSP">
-    <img src="https://img.shields.io/badge/MethodSonifyPulse-MSP-royalblue" alt="release">
+    <img src="https://img.shields.io/badge/MethodSonifyPulse-MSP-royalblue" alt="MSP">
+  </a>
+  <a href="./LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </a>
 </p>
 
@@ -18,91 +24,122 @@ _✨ Sonifying a radio pulse ✨_
   <a href="./README.md" target="_blank">English README</a>
 </p>
 
-## Description
+## 简介
 
-  射电望远镜可以将电磁场数字化采样并记录下来，这样的产生的原始数据格式与常见的Wave音频文件是完全一致的。但是射电望远镜接收信号的频率往往不在人耳听力范围内，需要将原始数据混频，降频到可听的频段才行。
+射电望远镜可以将电磁信号数字化采样并记录下来，但接收频率通常不在人耳可听范围内。原始数据通常经过傅立叶变换转换到时间-频率域，并丢弃相位信息以节省存储空间，因此无法恢复原始波形。
 
-  然而，这样的原始数据非常占用存储，一般望远镜也不会大规模记录这样的数据。通常是对数据进行傅立叶变换，转换到时间-频率空间，并且丢掉相位信息，如题图所示。这样可以节省大量的存储空间。但正因丢掉了相位信息，我们无法将这样的数据恢复为原始数据。
+**AstroSonify** 提供 6 种方法将这类无相位的时频数据转换为可听声音，从简单的轮廓映射到神经声码器重建。
 
-  如何将这种经过傅立叶变换后的数据声化？ 这里给出了几种声化方法的例子。
+## 安装
+
+```bash
+# 核心包（方法 1-3）
+pip install astrosonify
+
+# 附带 HiFi-GAN 神经声码器（方法 4）
+pip install astrosonify[hifigan]
+
+# 附带 MusicNet 风格迁移（方法 5）
+pip install astrosonify[musicnet]
+
+# 附带 astronify（方法 0）
+pip install astrosonify[astronify]
+
+# 安装全部
+pip install astrosonify[all]
+```
+
+## 快速开始
+
+### Python API
+
+```python
+import astrosonify as asf
+
+# 从 Hugging Face Hub 加载示例数据
+data = asf.load_example("burst")        # 二维时频谱 (时间 x 频率)
+profile = asf.load_example("profile")   # 一维脉冲轮廓
+
+# 方法 1：脉冲轮廓转波形（小提琴音色卷积）
+audio, sr = asf.profile_to_wave(data, sr=48000, duration=10, instrument="violin")
+
+# 方法 2：振幅调制正弦波
+audio, sr = asf.amplitude_modulate(profile, sr=48000, duration=2, freq=1000)
+
+# 方法 3：Griffin-Lim 声码器
+audio, sr = asf.griffinlim(data, sr=48000, n_iter=200)
+
+# 方法 4：HiFi-GAN 神经声码器（需要 torch）
+audio, sr = asf.hifigan(data)
+
+# 方法 5：WaveNet 音乐风格迁移（需要 torch + CUDA）
+audio, sr = asf.musicnet("input.wav", decoder_id=2)
+
+# 保存输出
+asf.save_audio(audio, sr, "output.wav")
+```
+
+### 命令行
+
+```bash
+# 列出可用方法
+astrosonify list-methods
+
+# 使用 Griffin-Lim 声化
+astrosonify griffinlim --input burst.npy --output burst.wav --sr 48000
+
+# 使用轮廓方法声化
+astrosonify profile --input burst.npy --output profile.wav --instrument violin
+
+# 使用振幅调制声化
+astrosonify amplitude --input profile.npy --output amp.wav --freq 1000
+
+# 下载示例数据
+astrosonify download-examples --dest ./data/
+```
 
 ## 方法列表
 
-  <details open>
-  <summary>第一种方法</summary>
-  </br>
-  <div align="left">
+| # | 方法 | 函数 | 额外依赖 |
+|---|------|------|---------|
+| 0 | Astronify（音高映射）| `astronify_sonify()` | astropy, astronify |
+| 1 | 脉冲轮廓转波形 | `profile_to_wave()` | 无 |
+| 2 | 振幅调制 | `amplitude_modulate()` | 无 |
+| 3 | Griffin-Lim 声码器 | `griffinlim()` | 无 |
+| 4 | HiFi-GAN 神经声码器 | `hifigan()` | torch, scikit-image |
+| 5 | WaveNet 风格迁移 | `musicnet()` | torch, tqdm, CUDA |
 
-  第一种是使用`astronify`，这是一个将光变曲线声化的python库。例子在`0-astronify.py`中。
+### 输入处理
 
-  先将我们的数据沿着频率轴做平均，只留脉冲轮廓。之后`astronify`可以将轮廓强度映射到音高，并写成音频文件。但其实我不太喜欢这种写法，写出来的声音有些奇怪，并且对参数要求很高，更适合光学波段的光变曲线（比较平滑的那种）。
+- **轮廓类方法（0, 1, 2）**：接受一维轮廓或二维时频谱（自动沿频率轴平均）
+- **时频谱方法（3, 4）**：接受二维时频谱（自动重采样到目标维度）
+- **MusicNet（5）**：接受 WAV 文件路径或一维音频数组
 
-  </div>
-  </details>
+所有方法返回 `(audio_array, sample_rate)` 元组。
 
+### 声码器对比
 
-  <details open>
-  <summary>第二种方法</summary>
-  </br>
-  <div align="left">
+<div align="center"><img src="Figure/MSPT.png" alt="时频谱对比" width="800px" /></div>
 
-  第二种是直接将脉冲轮廓写入Wave文件。例子在`1-profile2wave.py`中。
+左：原始时频数据。右：经声码器转换后重建的时频谱。
 
-  这种写法对不同数据写出来的音频听起来大差不差，因此可以将不同乐器的音频与脉冲轮廓卷积，以实现不同的音色。
+### MusicNet 风格迁移
 
-  </div>
-  </details>
+| 解码器 ID | 0 | 1 | 2 | 3 | 4 | 5 |
+|-----------|---|---|---|---|---|---|
+| 乐器 | 伴奏小提琴 | 独奏大提琴 | 独奏钢琴 | 独奏钢琴 | 弦乐四重奏 | 管风琴五重奏 |
+| 作曲家 | 贝多芬 | 巴赫 | 巴赫 | 贝多芬 | 贝多芬 | 卡姆比尼 |
 
+## 数据与模型
 
-  <details open>
-  <summary>第三种方法</summary>
-  </br>
-  <div align="left">
+示例数据和预训练模型托管在 [Hugging Face Hub](https://huggingface.co/SukiYume/astrosonify)，首次使用时自动下载。
 
-  第三种是脉冲轮廓对应响度。例子在`2-amp2loud.py`中。
+原始独立脚本和数据文件请查看 [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy/original-scripts) 分支。
 
-  </div>
-  </details>
+## 许可
 
+MIT License。见 [LICENSE](./LICENSE)。
 
-  <details open>
-  <summary>第四种方法</summary>
-  </br>
-  <div align="left">
-
-  第四种就是使用声码器（Vocoder）。例子在`3-griffinlim.py`和`4-hifi-gan.py`中。
-
-  前面我们提到数据的相位信息已经丢掉，无法恢复成原始数据。但是我们可以假设一个相位信息，做`ISTFT`。也即将时间-频率数据作为Mel声谱，据此还原音频。传统的比较好用的是`griffin_lim`声码器，它假设了一个初始相位，通过迭代，是还原出来音频的Mel声谱接近提供的Mel声谱。
-
-  随着深度学习技术的发展，TTS逐渐成熟。除了端到端的TTS，还有二阶段TTS，也即先通过文字生成Mel声谱，再将Mel声谱转换为声音。第二阶段也会用到类似的声码器。`Neural Vocoder`也从最初的`WaveNet`、`WaveRNN`、`UnivNet`，到现在的`HiFi-GAN`和`BigVGAN`。这里用的是`HiFi-GAN`已经预训练好的`Universal V1`模型，在[BigVGAN](https://bigvgan-demo.github.io/)的音频例子中，可以看到，`HiFi-GAN`对于器乐还原的效果还不错，是可用的状态。关于[HiFi-GAN](https://github.com/jik876/hifi-gan)的更多细节，可以查看官方的repo。
-
-  在`HiFi-GAN`的`UniversalV1`模型基础上，我们使用500首交响乐曲对模型进行微调，继续训练了500k步，模型放在`HiFiGAN/model`中。新模型在我们的数据上做测试，效果也还可以。
-
-  如下图中例子，左边是原始数据在时间-频率空间中的表现，右边转换到音频后短时傅里叶变换的结果。由于人耳对于声音的感应是对数的，因此轮廓经过了对数映射。
-
-  <div align="center"><img src="Figure/MSPT.png" alt="RMS" width="800px" /></div>
-
-  [Data/Burst-wirfi.wav](Data/Burst-wirfi.wav) 是转换后的音频示例。</p>
-
-  </div>
-  </details>
-
-  <p align="center" color='RoyalBlue'> - </p>
-
-  <details open>
-  <summary> 第五种方法 </summary>
-  </br>
-  <div align="left">
-
-  例子在`5-musicnet.py`中。或许不算一种新的方法，只是对输出的音乐进行风格迁移。使用的是[A Universal Music Translation Network](https://arxiv.org/abs/1805.07848)中的[模型](https://github.com/facebookresearch/music-translation)。
-
-  他们提供了5个预训练模型，对应的风格分别是
-  | 序号   | 0         | 1        | 2           | 3           | 4             | 5           |
-  | ---   | ---------- | -------- | --------- | ----------- | ------------- | ----------- |
-  | 乐器   | 伴奏小提琴 | 独奏大提琴 | 独奏钢琴   | 独奏钢琴   | 弦乐四重奏     | 管风琴五重奏 |
-  | 作曲家 | 贝多芬     | 巴赫      | 巴赫       | 贝多芬     | 贝多芬       | 卡姆比尼   |
-
-  </div>
-  </details>
-
-  <p align="center" color='RoyalBlue'> - </p>
+第三方模型代码：
+- HiFi-GAN：[jik876/hifi-gan](https://github.com/jik876/hifi-gan)（MIT）
+- MusicNet：[facebookresearch/music-translation](https://github.com/facebookresearch/music-translation)
