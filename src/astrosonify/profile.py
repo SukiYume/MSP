@@ -64,13 +64,14 @@ def profile_to_wave(
         instrument_path = get_instrument_path(instrument)
         sound = _read_wave(instrument_path)
 
-        n_resampled = int(len(sound) * sr / 44100)
+        n_resampled = max(1, int(len(sound) * 44100 / sr))
         if n_resampled > 0:
             sounds = stats.binned_statistic(
                 x=np.arange(len(sound)),
                 values=sound.astype(np.float64),
                 bins=n_resampled,
             )[0]
+            sounds = np.nan_to_num(sounds, nan=0.0, posinf=0.0, neginf=0.0)
             integral = np.trapezoid(sounds)
             if abs(integral) > 1e-10:
                 sound_norm = sounds / integral

@@ -79,6 +79,7 @@ def hifigan(
     if clean:
         data = del_burst(data, exposure_cut=exposure_cut)
 
+    # Keep original time_rebin logic but remove auto-trigger
     if time_rebin is not None:
         data = rebin_spectrogram(data, time_bins=time_rebin)
 

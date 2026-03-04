@@ -117,6 +117,53 @@ astrosonify download-examples --dest ./data/
 
 All methods return `(audio_array, sample_rate)` tuple.
 
+### Length & Downsampling Reference
+
+Let input shape be `(T, F)` for 2D data, or length `N` for 1D data.
+
+| # | Method | Output sample rate | Output duration from input length | Practical downsampling target |
+|---|--------|--------------------|-----------------------------------|-------------------------------|
+| 0 | `astronify_sonify` | Determined by astronify output WAV | If effective points are `L = floor(T / d)` (or `floor(N / d)`), duration is approximately `L * note_spacing` seconds (`note_spacing` default 0.01s) | Choose `L` around 200-2000 notes (e.g. `d = T / 1000`) |
+| 1 | `profile_to_wave` | User-set `sr` (default 48000) | Exactly `duration` seconds (default 10s), independent of input point count after interpolation | For stable timbre/envelope, keep effective profile length `L` around 200-5000 |
+| 2 | `amplitude_modulate` | User-set `sr` (default 48000) | Exactly `duration` seconds (default 2s), independent of input point count after interpolation | Similar to method 1, keep `L` around 200-5000 |
+| 3 | `griffinlim` | User-set `sr` (default 48000) | With `time_rebin = B_t`, duration is about `B_t * (frame_length/4)`; default `frame_length=0.04`, so `≈ B_t * 0.01` sec | Set `time_rebin ≈ 100 * target_seconds`; set `freq_rebin` to 256-512 |
+| 4 | `hifigan` | From model config (`sampling_rate`, current model: 22050) | With `time_rebin = B_t`, duration is approximately `B_t * hop_size / sampling_rate`; current model uses `hop_size=256`, so `≈ B_t * 0.01161` sec | Set `time_rebin ≈ target_seconds * 22050 / 256` (about `86 * target_seconds`) |
+| 5 | `musicnet` | User-set `sr` (default 48000) | Approximately keeps input WAV duration, but quantized by model stride: output samples `≈ floor(N/800) * 800` (current `encoder_pool=800`) | Usually no extra downsampling; trim/segment long inputs before conversion |
+
+#### Legacy-compatible fixed bins (reference)
+
+For users migrating from the legacy scripts, these fixed values reproduce the same time/frequency compression behavior in tests:
+
+- Method 3 (`griffinlim`): `time_rebin=128`, `freq_rebin=512`
+- Method 4 (`hifigan`): `time_rebin=128` (frequency is always resized to 80 mel bins by the model path)
+
+These values are now used in test coverage as reproducible listenable defaults; production usage can keep them configurable.
+
+#### 2D input: recommended size for the other axis (frequency)
+
+- Methods 0/1/2: 2D input is averaged along frequency (`mean(axis=1)`), so there is no strict frequency-bin target; keep at least `F >= 32`, with `64-1024` as a common practical range.
+- Method 3 (`griffinlim`): frequency is rebinned to `freq_rebin` (or `n_mels` if unset, default `512`); recommended output frequency bins are `256-512`, with `512` for legacy alignment.
+- Method 4 (`hifigan`): preprocessing always rescales frequency to `80` mel bins; input frequency length is flexible, but `F >= 80` (commonly `256-1024`) is recommended to reduce detail loss.
+
+Practical setup: choose `time_rebin` from target duration first, then set method 3 `freq_rebin` to `256` or `512`; for method 4, keep original frequency resolution reasonably high.
+
+#### Quick reference by common input shapes
+
+> The presets below target roughly 1-3 second outputs with listenable structure retained.
+
+| Input shape `(T, F)` | Recommended for method 3 (`griffinlim`) | Recommended for method 4 (`hifigan`) | Estimated duration |
+|---|---|---|---|
+| `(1024, 256)` | `time_rebin=100`, `freq_rebin=256` | `time_rebin=100` | M3: ~1.0s; M4: ~1.16s |
+| `(2048, 512)` | `time_rebin=128`, `freq_rebin=512` | `time_rebin=128` | M3: ~1.28s; M4: ~1.49s |
+| `(4096, 512)` | `time_rebin=200`, `freq_rebin=512` | `time_rebin=200` | M3: ~2.0s; M4: ~2.32s |
+| `(8192, 1024)` | `time_rebin=300`, `freq_rebin=512` | `time_rebin=300` | M3: ~3.0s; M4: ~3.48s |
+
+Notes:
+
+- Method 3 duration is approximately `time_rebin × 0.01s` with default parameters.
+- Method 4 duration is approximately `time_rebin × 256 / 22050 ≈ time_rebin × 0.01161s`.
+- Use `freq_rebin=512` for better frequency detail, or `256` for faster/lighter runs.
+
 ### Vocoder Comparison
 
 <div align="center"><img src="assets/MSPT.png" alt="Spectrogram comparison" width="800px" /></div>

@@ -4,6 +4,10 @@ from click.testing import CliRunner
 from astrosonify.cli import main
 
 
+LEGACY_GRIFFIN_TIME_BINS = 128
+LEGACY_GRIFFIN_FREQ_BINS = 512
+
+
 @pytest.fixture
 def runner():
     return CliRunner()
@@ -11,7 +15,7 @@ def runner():
 
 @pytest.fixture
 def npy_file(tmp_path):
-    data = np.random.default_rng(42).random((64, 128))
+    data = np.random.default_rng(42).random((256, 1024))
     path = tmp_path / "test.npy"
     np.save(str(path), data)
     return str(path)
@@ -57,7 +61,9 @@ class TestCLI:
         out = str(tmp_path / "out.wav")
         result = runner.invoke(main, [
             "griffinlim", "--input", npy_file, "--output", out,
-            "--n-iter", "5", "--n-mels", "64"
+            "--n-iter", "5", "--n-mels", str(LEGACY_GRIFFIN_FREQ_BINS),
+            "--time-rebin", str(LEGACY_GRIFFIN_TIME_BINS),
+            "--freq-rebin", str(LEGACY_GRIFFIN_FREQ_BINS),
         ])
         assert result.exit_code == 0, f"Failed: {result.output}\n{result.exception}"
 

@@ -70,25 +70,28 @@ def amplitude(input_path, output_path, sr, duration, freq, downsample):
 @click.option("--n-iter", default=200, help="Griffin-Lim iterations")
 @click.option("--n-mels", default=512, help="Number of mel bands")
 @click.option("--n-fft", default=4096, help="FFT size")
+@click.option("--time-rebin", default=None, type=int, help="Time downsample bins")
+@click.option("--freq-rebin", default=None, type=int, help="Freq downsample bins")
 @click.option("--clean", is_flag=True, help="Apply burst cleaning")
-def griffinlim(input_path, output_path, sr, n_iter, n_mels, n_fft, clean):
+def griffinlim(input_path, output_path, sr, n_iter, n_mels, n_fft, time_rebin, freq_rebin, clean):
     """Sonify using Griffin-Lim vocoder (Method 3)."""
     from .griffinlim import griffinlim as gl
     data = np.load(input_path)
     gl(data, sr=sr, n_iter=n_iter, n_mels=n_mels, n_fft=n_fft,
-       clean=clean, output=output_path)
+       time_rebin=time_rebin, freq_rebin=freq_rebin, clean=clean, output=output_path)
     click.echo(f"Saved to {output_path}")
 
 
 @main.command()
 @click.option("--input", "input_path", required=True, help="Input .npy file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
+@click.option("--time-rebin", default=None, type=int, help="Time downsample bins")
 @click.option("--clean", is_flag=True, help="Apply burst cleaning")
-def hifigan(input_path, output_path, clean):
+def hifigan(input_path, output_path, time_rebin, clean):
     """Sonify using HiFi-GAN neural vocoder (Method 4)."""
     from .hifigan import hifigan as hf
     data = np.load(input_path)
-    hf(data, clean=clean, output=output_path)
+    hf(data, time_rebin=time_rebin, clean=clean, output=output_path)
     click.echo(f"Saved to {output_path}")
 
 
