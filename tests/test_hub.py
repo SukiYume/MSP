@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from astrosonify.hub import get_data_path, get_model_path, get_instrument_path, load_example
 
-REPO_ID = "SukiYume/astrosonify"
+REPO_ID = "TorchLight/astrosonify"
 
 
 class TestGetDataPath:

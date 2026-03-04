@@ -88,14 +88,18 @@ def musicnet(
         # Download model files
         checkpoint_file = f"{checkpoint_type}_{decoder_id}.pth"
         checkpoint_path = get_model_path("musicnet", checkpoint_file)
-        args_path = get_model_path("musicnet", "args.pth")
+        args_path = get_model_path("musicnet", "args.json")
 
         from .models.musicnet import wavenet_models
         from .models.musicnet.utils import mu_law, inv_mu_law
         from .models.musicnet.wavenet import WaveNet
         from .models.musicnet.wavenet_generator import WavenetGenerator
 
-        model_args = torch.load(args_path, map_location="cpu")[0]
+        import json
+        import argparse
+        with open(args_path) as f:
+            args_data = json.load(f)
+        model_args = argparse.Namespace(**args_data["args"])
 
         encoder = wavenet_models.Encoder(model_args)
         state = torch.load(checkpoint_path, map_location="cpu")

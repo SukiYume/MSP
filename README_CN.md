@@ -132,7 +132,7 @@ astrosonify download-examples --dest ./data/
 
 ## 数据与模型
 
-示例数据和预训练模型托管在 [Hugging Face Hub](https://huggingface.co/SukiYume/astrosonify)，首次使用时自动下载。
+示例数据和预训练模型托管在 [Hugging Face Hub](https://huggingface.co/TorchLight/astrosonify)，首次使用时自动下载。
 
 原始独立脚本和数据文件请查看 [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy/original-scripts) 分支。
 

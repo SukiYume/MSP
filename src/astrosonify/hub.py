@@ -6,7 +6,7 @@ import os
 import numpy as np
 from huggingface_hub import hf_hub_download
 
-REPO_ID = "SukiYume/astrosonify"
+REPO_ID = "TorchLight/astrosonify"
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "astrosonify")
 
 EXAMPLE_MAP = {

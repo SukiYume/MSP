@@ -132,7 +132,7 @@ Left: original time-frequency data. Right: reconstructed spectrogram after vocod
 
 ## Data & Models
 
-Example data and pre-trained models are hosted on [Hugging Face Hub](https://huggingface.co/SukiYume/astrosonify) and downloaded automatically on first use.
+Example data and pre-trained models are hosted on [Hugging Face Hub](https://huggingface.co/TorchLight/astrosonify) and downloaded automatically on first use.
 
 For the original standalone scripts and data files, see the [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy/original-scripts) branch.
 
