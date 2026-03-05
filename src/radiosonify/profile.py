@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy import interpolate, signal, stats
 import soundfile as sf
+from scipy import interpolate, signal, stats
 
 from .core import normalize, save_audio, to_profile
 from .hub import get_instrument_path
