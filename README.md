@@ -227,7 +227,7 @@ $env:ASTROSONIFY_CACHE_DIR = "D:\\astrosonify-cache"
 
 This project downloads model checkpoints from the official repository on Hugging Face Hub. Loading uses a safer weights-only path where available (`torch.load(..., weights_only=True)`), with backward-compatible fallback for older PyTorch versions.
 
-For the original standalone scripts and data files, see the [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy/original-scripts) branch.
+For the original standalone scripts and data files, see the [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy%2Foriginal-scripts) branch.
 
 ## License
 

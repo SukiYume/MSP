@@ -227,7 +227,7 @@ $env:ASTROSONIFY_CACHE_DIR = "D:\\astrosonify-cache"
 
 本项目从 Hugging Face Hub 官方仓库下载模型权重。加载时在可用版本上优先使用更安全的 weights-only 路径（`torch.load(..., weights_only=True)`），并对旧版 PyTorch 保持兼容回退。
 
-原始独立脚本和数据文件请查看 [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy/original-scripts) 分支。
+原始独立脚本和数据文件请查看 [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy%2Foriginal-scripts) 分支。
 
 ## 许可
 
