@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import warnings
+
 import numpy as np
 
-from .core import rebin_spectrogram, del_burst, normalize, save_audio, require
+from .core import del_burst, normalize, rebin_spectrogram, require, save_audio
 from .hub import get_model_path
 
 _logger = logging.getLogger(__name__)

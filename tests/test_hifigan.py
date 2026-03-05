@@ -54,7 +54,7 @@ class _FakeTorch:
         return name
 
     @staticmethod
-    def load(path, map_location=None):
+    def load(path, map_location=None, weights_only=False):
         return {"generator": {}}
 
     @staticmethod
@@ -159,7 +159,6 @@ class TestHifiGAN:
         with pytest.raises(ValueError, match="2D"):
             hifigan_module.hifigan(np.ones(128))
 
-    @pytest.mark.filterwarnings("ignore:weights_only=True not supported")
     def test_returns_audio_and_sr(self, fake_hifigan_runtime):
         spec = np.random.default_rng(42).random((256, 1024))
         audio, sr = hifigan_module.hifigan(spec, time_rebin=128)
@@ -169,7 +168,6 @@ class TestHifiGAN:
         assert np.max(np.abs(audio)) > 1e-6
         assert sr == 48000
 
-    @pytest.mark.filterwarnings("ignore:weights_only=True not supported")
     def test_saves_to_file(self, fake_hifigan_runtime, tmp_path):
         spec = np.random.default_rng(42).random((256, 1024))
         out = tmp_path / "hifigan.wav"

@@ -113,7 +113,8 @@ def musicnet(input_path, output_path, decoder_id, checkpoint_type, sr):
 def download_examples(dest):
     """Download example data files from Hugging Face Hub."""
     import os
-    from .hub import load_example, EXAMPLE_MAP
+
+    from .hub import EXAMPLE_MAP, load_example
     os.makedirs(dest, exist_ok=True)
     for name, filename in EXAMPLE_MAP.items():
         click.echo(f"Downloading {name} ({filename})...")

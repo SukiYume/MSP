@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
+
 import numpy as np
 import soundfile as sf
 
@@ -22,11 +23,11 @@ def require(module: str, extra: str) -> Any:
     """
     try:
         return __import__(module)
-    except ImportError:
+    except ImportError as err:
         raise ImportError(
             f"This feature requires '{module}'. "
             f"Install with: pip install radiosonify[{extra}]"
-        )
+        ) from err
 
 
 def normalize(data: np.ndarray) -> np.ndarray:

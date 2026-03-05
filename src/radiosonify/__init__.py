@@ -8,17 +8,17 @@ from __future__ import annotations
 
 __version__ = "0.1.2"
 
+from .amplitude import amplitude_modulate
 from .core import (
-    normalize,
     del_burst,
+    normalize,
     rebin_spectrogram,
-    to_profile,
     save_audio,
+    to_profile,
 )
+from .griffinlim import griffinlim
 from .hub import load_example
 from .profile import profile_to_wave
-from .amplitude import amplitude_modulate
-from .griffinlim import griffinlim
 
 
 # Lazy imports for optional-dependency methods

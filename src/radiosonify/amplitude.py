@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.interpolate import interp1d
 
-from .core import to_profile, save_audio
+from .core import save_audio, to_profile
 
 
 def amplitude_modulate(

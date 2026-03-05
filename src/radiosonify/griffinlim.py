@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import numpy as np
 import librosa
+import numpy as np
 from scipy import signal as scipy_signal
 
-from .core import rebin_spectrogram, del_burst, save_audio
+from .core import del_burst, rebin_spectrogram, save_audio
 
 
 def _mel_to_linear_matrix(sr: int, n_fft: int, n_mels: int) -> np.ndarray:

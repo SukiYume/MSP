@@ -17,7 +17,7 @@ class CausalConv1d(nn.Conv1d):
                  kernel_size=2,
                  dilation=1,
                  **kwargs):
-        super(CausalConv1d, self).__init__(
+        super().__init__(
             in_channels,
             out_channels,
             kernel_size,
@@ -26,14 +26,14 @@ class CausalConv1d(nn.Conv1d):
             **kwargs)
 
     def forward(self, input):
-        out = super(CausalConv1d, self).forward(input)
+        out = super().forward(input)
         return out[:, :, :-self.padding[0]]
 
 
 class WavenetLayer(nn.Module):
     def __init__(self, residual_channels, skip_channels, cond_channels,
                  kernel_size=2, dilation=1):
-        super(WavenetLayer, self).__init__()
+        super().__init__()
 
         self.causal = CausalConv1d(residual_channels, 2 * residual_channels,
                                    kernel_size, dilation=dilation, bias=True)
@@ -153,15 +153,15 @@ class WaveNet(nn.Module):
         Wres, Bres = [], []
         Wskip, Bskip = [], []
 
-        for l in self.layers:
-            Wdilated.append(l.causal.weight)
-            Bdilated.append(l.causal.bias)
+        for layer in self.layers:
+            Wdilated.append(layer.causal.weight)
+            Bdilated.append(layer.causal.bias)
 
-            Wres.append(l.residual.weight)
-            Bres.append(l.residual.bias)
+            Wres.append(layer.residual.weight)
+            Bres.append(layer.residual.bias)
 
-            Wskip.append(l.skip.weight)
-            Bskip.append(l.skip.bias)
+            Wskip.append(layer.skip.weight)
+            Bskip.append(layer.skip.bias)
 
         return Wdilated, Bdilated, Wres, Bres, Wskip, Bskip
 

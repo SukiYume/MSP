@@ -4,13 +4,13 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 #
+import logging
+import time
+from collections import deque
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from collections import deque
-
-import time
-import logging
 
 from .wavenet import WaveNet
 
@@ -103,7 +103,7 @@ class WavenetGenerator(nn.Module):
         elif method == 'max':
             _, samples = torch.max(F.softmax(prediction, dim=1), dim=1)
         else:
-            assert False, "Method not supported."
+            raise AssertionError("Method not supported.")
 
         return samples
 

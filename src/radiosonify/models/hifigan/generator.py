@@ -5,8 +5,8 @@ Adapted from https://github.com/jik876/hifi-gan (MIT License).
 """
 
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn import Conv1d, ConvTranspose1d
 
 try:
@@ -17,7 +17,7 @@ try:
     def remove_weight_norm(module: nn.Module) -> nn.Module:
         return _remove_param(module, "weight")
 except ImportError:
-    from torch.nn.utils import weight_norm, remove_weight_norm  # type: ignore[assignment]
+    from torch.nn.utils import remove_weight_norm, weight_norm  # type: ignore[assignment]
 
 LRELU_SLOPE = 0.1
 
@@ -65,10 +65,10 @@ class ResBlock1(torch.nn.Module):
         return x
 
     def remove_weight_norm(self):
-        for l in self.convs1:
-            remove_weight_norm(l)
-        for l in self.convs2:
-            remove_weight_norm(l)
+        for conv in self.convs1:
+            remove_weight_norm(conv)
+        for conv in self.convs2:
+            remove_weight_norm(conv)
 
 
 class ResBlock2(torch.nn.Module):
@@ -91,8 +91,8 @@ class ResBlock2(torch.nn.Module):
         return x
 
     def remove_weight_norm(self):
-        for l in self.convs:
-            remove_weight_norm(l)
+        for conv in self.convs:
+            remove_weight_norm(conv)
 
 
 class Generator(torch.nn.Module):
@@ -139,9 +139,9 @@ class Generator(torch.nn.Module):
         return x
 
     def remove_weight_norm(self):
-        for l in self.ups:
-            remove_weight_norm(l)
-        for l in self.resblocks:
-            l.remove_weight_norm()
+        for layer in self.ups:
+            remove_weight_norm(layer)
+        for layer in self.resblocks:
+            layer.remove_weight_norm()
         remove_weight_norm(self.conv_pre)
         remove_weight_norm(self.conv_post)

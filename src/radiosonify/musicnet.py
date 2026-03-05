@@ -6,10 +6,11 @@ import logging
 import pathlib
 import pickle
 import warnings
-import numpy as np
 from pathlib import Path
 
-from .core import save_audio, require
+import numpy as np
+
+from .core import require, save_audio
 from .hub import get_model_path
 
 _logger = logging.getLogger(__name__)
@@ -113,13 +114,13 @@ def musicnet(
     checkpoint_path = get_model_path("musicnet", checkpoint_file)
     args_path = get_model_path("musicnet", "args.json")
 
+    import argparse
+    import json
+
     from .models.musicnet import wavenet_models
-    from .models.musicnet.utils import mu_law, inv_mu_law
+    from .models.musicnet.utils import inv_mu_law, mu_law
     from .models.musicnet.wavenet import WaveNet
     from .models.musicnet.wavenet_generator import WavenetGenerator
-
-    import json
-    import argparse
     with open(args_path) as f:
         args_data = json.load(f)
     model_args = argparse.Namespace(**args_data["args"])

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 import soundfile as sf
-from scipy import stats, signal, interpolate
+from scipy import interpolate, signal, stats
 
-from .core import to_profile, normalize, save_audio
+from .core import normalize, save_audio, to_profile
 from .hub import get_instrument_path
 
 
