@@ -6,10 +6,15 @@ import os
 import time
 import numpy as np
 
-# Suppress the Windows symlink warning from huggingface_hub; caching still works.
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import (
+    EntryNotFoundError,
+    LocalEntryNotFoundError,
+    RepositoryNotFoundError,
+    RevisionNotFoundError,
+)
 
 REPO_ID = "TorchLight/radiosonify"
 CACHE_DIR = os.environ.get(
@@ -31,7 +36,6 @@ INSTRUMENT_MAP = {
 
 
 def _download_with_context(filename: str) -> str:
-    # Try local cache first to avoid unnecessary network round-trips.
     try:
         return hf_hub_download(
             repo_id=REPO_ID,
@@ -39,10 +43,13 @@ def _download_with_context(filename: str) -> str:
             cache_dir=CACHE_DIR,
             local_files_only=True,
         )
-    except Exception:
+    except LocalEntryNotFoundError:
         pass
+    except (EntryNotFoundError, RepositoryNotFoundError, RevisionNotFoundError) as e:
+        raise RuntimeError(
+            f"Resource '{filename}' not found in Hugging Face repo '{REPO_ID}': {e}"
+        ) from e
 
-    # File not in local cache – attempt to download from the hub.
     last_error = None
     for attempt in range(2):
         try:
@@ -51,7 +58,11 @@ def _download_with_context(filename: str) -> str:
                 filename=filename,
                 cache_dir=CACHE_DIR,
             )
-        except Exception as exc:  # pragma: no cover - upstream exception shapes vary.
+        except (EntryNotFoundError, RepositoryNotFoundError, RevisionNotFoundError) as e:
+            raise RuntimeError(
+                f"Resource '{filename}' not found in Hugging Face repo '{REPO_ID}': {e}"
+            ) from e
+        except Exception as exc:
             last_error = exc
             if attempt == 0:
                 time.sleep(0.3)

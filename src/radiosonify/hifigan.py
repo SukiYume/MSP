@@ -3,32 +3,23 @@
 from __future__ import annotations
 
 import json
+import logging
+import warnings
 import numpy as np
 
-from .core import rebin_spectrogram, del_burst, normalize, save_audio
+from .core import rebin_spectrogram, del_burst, normalize, save_audio, require
 from .hub import get_model_path
+
+_logger = logging.getLogger(__name__)
 
 
 def _require_torch():
-    try:
-        import torch
-        return torch
-    except ImportError:
-        raise ImportError(
-            "HiFi-GAN method requires PyTorch. "
-            "Install with: pip install radiosonify[hifigan]"
-        )
+    return require("torch", "hifigan")
 
 
 def _require_skimage():
-    try:
-        from skimage.transform import resize
-        return resize
-    except ImportError:
-        raise ImportError(
-            "HiFi-GAN method requires scikit-image. "
-            "Install with: pip install radiosonify[hifigan]"
-        )
+    from skimage.transform import resize
+    return resize
 
 
 def _rescale_data(data: np.ndarray, resize_fn) -> np.ndarray:
@@ -51,6 +42,13 @@ def _torch_load_state_dict(torch, checkpoint_path: str, device):
     try:
         return torch.load(checkpoint_path, map_location=device, weights_only=True)
     except TypeError:
+        warnings.warn(
+            "weights_only=True not supported by this PyTorch version. "
+            "Falling back to legacy torch.load(). Model checkpoints are loaded "
+            "from the official Hugging Face repository (TorchLight/radiosonify).",
+            UserWarning,
+            stacklevel=3,
+        )
         return torch.load(checkpoint_path, map_location=device)
 
 

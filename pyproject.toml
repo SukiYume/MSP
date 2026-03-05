@@ -38,7 +38,7 @@ dependencies = [
 hifigan = ["torch", "scikit-image"]
 musicnet = ["torch", "tqdm"]
 all = ["torch", "scikit-image", "tqdm"]
-dev = ["pytest", "pytest-cov"]
+dev = ["pytest", "pytest-cov", "ruff"]
 
 [project.scripts]
 radiosonify = "radiosonify.cli:main"
@@ -58,3 +58,11 @@ packages = ["src/radiosonify"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

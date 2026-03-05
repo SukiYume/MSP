@@ -2,35 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 import pathlib
 import pickle
+import warnings
 import numpy as np
 from pathlib import Path
 
-from .core import save_audio
+from .core import save_audio, require
 from .hub import get_model_path
+
+_logger = logging.getLogger(__name__)
 
 
 def _require_torch():
-    try:
-        import torch
-        return torch
-    except ImportError:
-        raise ImportError(
-            "MusicNet method requires PyTorch. "
-            "Install with: pip install radiosonify[musicnet]"
-        )
+    return require("torch", "musicnet")
 
 
 def _require_tqdm():
-    try:
-        import tqdm
-        return tqdm
-    except ImportError:
-        raise ImportError(
-            "MusicNet method requires tqdm. "
-            "Install with: pip install radiosonify[musicnet]"
-        )
+    return require("tqdm", "musicnet")
 
 
 STYLE_NAMES = {
@@ -58,6 +48,13 @@ def _load_checkpoint(torch, checkpoint_path: str):
     try:
         return torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     except TypeError:
+        warnings.warn(
+            "weights_only=True not supported by this PyTorch version. "
+            "Falling back to legacy torch.load(). Model checkpoints are loaded "
+            "from the official Hugging Face repository (TorchLight/radiosonify).",
+            UserWarning,
+            stacklevel=3,
+        )
         return torch.load(
             checkpoint_path,
             map_location="cpu",
@@ -72,6 +69,7 @@ def musicnet(
     sr: int = 48000,
     batch_size: int = 1,
     split_size: int = 20,
+    num_threads: int | None = 1,
     output: str | None = None,
 ) -> tuple[np.ndarray, int]:
     """Apply music style transfer using WaveNet encoder-decoder.
@@ -86,6 +84,7 @@ def musicnet(
         sr: Sample rate for loading/output.
         batch_size: Batch size for inference.
         split_size: Split size for autoregressive generation.
+        num_threads: CPU threads for decoder. None = keep current. Default 1.
         output: Path to save WAV file. None = don't save.
 
     Returns:
@@ -103,15 +102,13 @@ def musicnet(
     if torch.cuda.is_available():
         enc_device = torch.device("cuda")
         gpu_name = torch.cuda.get_device_name(0)
-        print(f"  [musicnet] encoder: cuda  ({gpu_name})")
+        _logger.info("encoder: cuda (%s)", gpu_name)
     else:
         enc_device = torch.device("cpu")
-        print("  [musicnet] encoder: cpu  (CUDA not available)")
+        _logger.info("encoder: cpu (CUDA not available)")
     dec_device = torch.device("cpu")
-    print(f"  [musicnet] decoder: cpu")
+    _logger.info("decoder: cpu")
 
-
-    # Download model files
     checkpoint_file = f"{checkpoint_type}_{decoder_id}.pth"
     checkpoint_path = get_model_path("musicnet", checkpoint_file)
     args_path = get_model_path("musicnet", "args.json")
@@ -149,31 +146,30 @@ def musicnet(
 
     data = mu_law(data)
     duration_sec = len(data) / sr
-    print(f"  [musicnet] input audio: {len(data)} samples  ({duration_sec:.2f}s @ {sr} Hz)")
+    _logger.info("input audio: %d samples (%.2fs @ %d Hz)", len(data), duration_sec, sr)
 
     xs = torch.stack([torch.tensor(data).unsqueeze(0).float().to(enc_device)]).contiguous()
 
-    # Limit intra-op threads for the CPU decoder: tiny [B,C,1] tensors suffer from
-    # thread-pool dispatch overhead more than they benefit from parallelism.
     prev_threads = torch.get_num_threads()
 
     with torch.inference_mode():
         zz = torch.cat([encoder(xs_batch) for xs_batch in torch.split(xs, batch_size)], dim=0)
-        zz = zz.to(dec_device)  # move encodings to CPU for autoregressive generation
+        zz = zz.to(dec_device)
 
-        # Free encoder + GPU memory before the slow generation loop
         del encoder, state, xs
         if enc_device.type == "cuda":
             torch.cuda.empty_cache()
 
         enc_steps = zz.size(2)
         n_splits = (enc_steps + split_size - 1) // split_size
-        est_sec = enc_steps * 0.8  # rough estimate: ~0.8s per encoding step on CPU
-        print(f"  [musicnet] encoding shape: {tuple(zz.shape)}  "
-              f"-> {enc_steps} steps / {n_splits} splits  "
-              f"(rough est. {est_sec:.0f}s)")
+        est_sec = enc_steps * 0.8
+        _logger.info(
+            "encoding shape: %s -> %d steps / %d splits (est. %.0fs)",
+            tuple(zz.shape), enc_steps, n_splits, est_sec,
+        )
 
-        torch.set_num_threads(1)
+        if num_threads is not None:
+            torch.set_num_threads(num_threads)
         audio_res = []
         for zz_batch in torch.split(zz, batch_size):
             splits = torch.split(zz_batch, split_size, -1)

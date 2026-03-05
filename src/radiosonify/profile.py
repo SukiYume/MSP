@@ -49,6 +49,14 @@ def profile_to_wave(
     profile = to_profile(data, downsample=time_downsample)
     profile = np.tile(profile, repeat)
 
+    # Guard against degenerate single-sample profile (division by zero)
+    if len(profile) < 2:
+        # With only one sample, output silence of requested duration
+        audio = np.zeros(int(sr * duration), dtype=np.float32)
+        if output is not None:
+            save_audio(audio, sr, output)
+        return audio, sr
+
     n_samples = int(sr * duration)
     time_axis = np.arange(len(profile)) / (len(profile) - 1) * duration
     f_interp = interpolate.interp1d(time_axis, profile, kind="linear")

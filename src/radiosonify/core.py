@@ -2,8 +2,31 @@
 
 from __future__ import annotations
 
+from typing import Any, Callable
 import numpy as np
 import soundfile as sf
+
+
+def require(module: str, extra: str) -> Any:
+    """Import a module or raise ImportError with install hint.
+
+    Args:
+        module: Module name to import.
+        extra: pip install extra name (e.g., 'hifigan', 'musicnet').
+
+    Returns:
+        The imported module.
+
+    Raises:
+        ImportError: If the module is not installed.
+    """
+    try:
+        return __import__(module)
+    except ImportError:
+        raise ImportError(
+            f"This feature requires '{module}'. "
+            f"Install with: pip install radiosonify[{extra}]"
+        )
 
 
 def normalize(data: np.ndarray) -> np.ndarray:
@@ -42,6 +65,11 @@ def rebin_spectrogram(
     freq_bins: int | None = None,
 ) -> np.ndarray:
     """Rebin a 2D spectrogram by averaging adjacent bins.
+
+    Note:
+        When input dimensions are not evenly divisible by target bins,
+        remainder data is truncated (floor division). For example,
+        rebinning 100 time bins to 30 uses only the first 90 bins.
 
     Args:
         data: 2D array (time x freq).

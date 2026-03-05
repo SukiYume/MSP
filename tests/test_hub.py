@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
+from huggingface_hub.errors import LocalEntryNotFoundError, EntryNotFoundError
 from radiosonify.hub import get_data_path, get_model_path, get_instrument_path, load_example
 
 REPO_ID = "TorchLight/radiosonify"
@@ -21,7 +22,10 @@ class TestGetDataPath:
 
     @patch("radiosonify.hub.hf_hub_download")
     def test_wraps_download_error_with_actionable_message(self, mock_download):
-        mock_download.side_effect = RuntimeError("network down")
+        mock_download.side_effect = [
+            LocalEntryNotFoundError("not in cache"),
+            RuntimeError("network down"),
+        ]
         with pytest.raises(RuntimeError, match="Failed to download"):
             get_data_path("Burst.npy")
 
