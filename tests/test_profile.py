@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 from unittest.mock import patch
-from astrosonify.profile import profile_to_wave
+from radiosonify.profile import profile_to_wave
 
 
 class TestProfileToWave:
@@ -27,7 +27,7 @@ class TestProfileToWave:
         audio, sr = profile_to_wave(data, sr=48000, duration=1, instrument=None)
         assert len(audio) == 48000
 
-    @patch("astrosonify.profile.get_instrument_path")
+    @patch("radiosonify.profile.get_instrument_path")
     def test_with_instrument(self, mock_get_path, tmp_path):
         import soundfile as sf
         fake_wav = np.sin(np.linspace(0, 2 * np.pi * 440, 4800)).astype(np.float32)

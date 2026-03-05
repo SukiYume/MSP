@@ -22,13 +22,12 @@ def test_build_legacy_output_paths_matches_legacy_filenames(tmp_path):
 
     outputs = mod.build_legacy_output_paths(tmp_path)
 
-    assert outputs[0].name == "Audio.wav"
     assert outputs[1].name == "Audio.wav"
     assert outputs[2].name == "Audio.wav"
     assert outputs[3].name == "Audio.wav"
     assert outputs[4].name == "RawBurst_Generated.wav"
     assert outputs[5].name == "MusicNet_Converted.wav"
-    assert outputs[0].parent.name == "method0_astronify"
+    assert outputs[1].parent.name == "method1_profile2wave"
     assert outputs[5].parent.name == "method5_musicnet"
 
 
@@ -43,11 +42,6 @@ def test_reproduce_legacy_wavs_generates_all_outputs(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mod.asf, "load_example", lambda name: np.ones((8, 8), dtype=np.float32))
 
-    monkeypatch.setattr(
-        mod.asf,
-        "astronify_sonify",
-        lambda data, note_spacing, time_downsample, output: (called.append("m0"), _writer(output), (np.zeros(8), 48000))[-1],
-    )
     monkeypatch.setattr(
         mod.asf,
         "profile_to_wave",
@@ -77,7 +71,7 @@ def test_reproduce_legacy_wavs_generates_all_outputs(tmp_path, monkeypatch):
 
     outputs = mod.reproduce_legacy_wavs(tmp_path)
 
-    assert called == ["m0", "m1", "m2", "m3", "m4", "m5"]
+    assert called == ["m1", "m2", "m3", "m4", "m5"]
     for path in outputs.values():
         assert path.exists()
         assert path.stat().st_size > 0

@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from astrosonify.core import (
+from radiosonify.core import (
     normalize,
     del_burst,
     rebin_spectrogram,

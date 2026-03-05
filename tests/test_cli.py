@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from click.testing import CliRunner
-from astrosonify.cli import main
+from radiosonify.cli import main
 
 
 LEGACY_GRIFFIN_TIME_BINS = 128
@@ -33,31 +33,13 @@ class TestCLI:
     def test_help(self, runner):
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
-        assert "AstroSonify" in result.output
+        assert "RadioSonify" in result.output
 
     def test_list_methods(self, runner):
         result = runner.invoke(main, ["list-methods"])
         assert result.exit_code == 0
         assert "griffinlim" in result.output
         assert "profile" in result.output
-        assert "astronify" in result.output
-
-    def test_astronify_command(self, runner, profile_file, tmp_path, monkeypatch):
-        out = str(tmp_path / "out.wav")
-
-        def _fake_astronify(data, note_spacing=0.01, time_downsample=10, output=None):
-            import soundfile as sf
-            sf.write(output, np.zeros(480, dtype=np.float32), 48000)
-            return np.zeros(480, dtype=np.float32), 48000
-
-        from astrosonify import astronify_method
-        monkeypatch.setattr(astronify_method, "astronify_sonify", _fake_astronify)
-
-        result = runner.invoke(main, [
-            "astronify", "--input", profile_file, "--output", out,
-            "--note-spacing", "0.02", "--downsample", "5"
-        ])
-        assert result.exit_code == 0, f"Failed: {result.output}\n{result.exception}"
 
     def test_profile_command(self, runner, profile_file, tmp_path):
         out = str(tmp_path / "out.wav")

@@ -1,25 +1,25 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from astrosonify.hub import get_data_path, get_model_path, get_instrument_path, load_example
+from radiosonify.hub import get_data_path, get_model_path, get_instrument_path, load_example
 
-REPO_ID = "TorchLight/astrosonify"
+REPO_ID = "TorchLight/radiosonify"
 
 
 class TestGetDataPath:
-    @patch("astrosonify.hub.hf_hub_download")
+    @patch("radiosonify.hub.hf_hub_download")
     def test_calls_hf_download(self, mock_download):
         mock_download.return_value = "/fake/path/Burst.npy"
         result = get_data_path("Burst.npy")
         mock_download.assert_called_once()
         assert result == "/fake/path/Burst.npy"
 
-    @patch("astrosonify.hub.hf_hub_download")
+    @patch("radiosonify.hub.hf_hub_download")
     def test_returns_path_string(self, mock_download):
         mock_download.return_value = "/fake/path/Burst.npy"
         result = get_data_path("Burst.npy")
         assert isinstance(result, str)
 
-    @patch("astrosonify.hub.hf_hub_download")
+    @patch("radiosonify.hub.hf_hub_download")
     def test_wraps_download_error_with_actionable_message(self, mock_download):
         mock_download.side_effect = RuntimeError("network down")
         with pytest.raises(RuntimeError, match="Failed to download"):
@@ -27,7 +27,7 @@ class TestGetDataPath:
 
 
 class TestGetModelPath:
-    @patch("astrosonify.hub.hf_hub_download")
+    @patch("radiosonify.hub.hf_hub_download")
     def test_hifigan_model(self, mock_download):
         mock_download.return_value = "/fake/path/generator.pth"
         result = get_model_path("hifigan", "generator.pth")
@@ -36,7 +36,7 @@ class TestGetModelPath:
 
 
 class TestGetInstrumentPath:
-    @patch("astrosonify.hub.hf_hub_download")
+    @patch("radiosonify.hub.hf_hub_download")
     def test_violin(self, mock_download):
         mock_download.return_value = "/fake/path/vio.wav"
         result = get_instrument_path("violin")
@@ -49,8 +49,8 @@ class TestGetInstrumentPath:
 
 
 class TestLoadExample:
-    @patch("astrosonify.hub.np.load")
-    @patch("astrosonify.hub.get_data_path")
+    @patch("radiosonify.hub.np.load")
+    @patch("radiosonify.hub.get_data_path")
     def test_load_burst(self, mock_get_path, mock_np_load):
         mock_get_path.return_value = "/fake/Burst.npy"
         mock_np_load.return_value = "fake_array"

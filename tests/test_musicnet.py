@@ -2,7 +2,7 @@ import numpy as np
 import pathlib
 import pytest
 
-import astrosonify.musicnet as musicnet_module
+import radiosonify.musicnet as musicnet_module
 
 
 class _FakeCuda:

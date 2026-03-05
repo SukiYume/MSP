@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from astrosonify.griffinlim import griffinlim
+from radiosonify.griffinlim import griffinlim
 
 
 LEGACY_GRIFFIN_TIME_BINS = 128

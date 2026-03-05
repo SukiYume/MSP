@@ -4,7 +4,7 @@ import types
 import numpy as np
 import pytest
 
-import astrosonify.hifigan as hifigan_module
+import radiosonify.hifigan as hifigan_module
 
 
 class _FakeNoGrad:
@@ -115,13 +115,13 @@ def fake_hifigan_runtime(monkeypatch, tmp_path):
 
     monkeypatch.setattr(hifigan_module, "get_model_path", _fake_get_model_path)
 
-    fake_env_module = types.ModuleType("astrosonify.models.hifigan.env")
+    fake_env_module = types.ModuleType("radiosonify.models.hifigan.env")
     setattr(fake_env_module, "AttrDict", _FakeAttrDict)
-    fake_generator_module = types.ModuleType("astrosonify.models.hifigan.generator")
+    fake_generator_module = types.ModuleType("radiosonify.models.hifigan.generator")
     setattr(fake_generator_module, "Generator", _FakeGenerator)
 
-    monkeypatch.setitem(sys.modules, "astrosonify.models.hifigan.env", fake_env_module)
-    monkeypatch.setitem(sys.modules, "astrosonify.models.hifigan.generator", fake_generator_module)
+    monkeypatch.setitem(sys.modules, "radiosonify.models.hifigan.env", fake_env_module)
+    monkeypatch.setitem(sys.modules, "radiosonify.models.hifigan.generator", fake_generator_module)
 
 
 class TestHifiGAN:

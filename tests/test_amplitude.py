@@ -1,7 +1,7 @@
 # tests/test_amplitude.py
 import numpy as np
 import pytest
-from astrosonify.amplitude import amplitude_modulate
+from radiosonify.amplitude import amplitude_modulate
 
 
 class TestAmplitudeModulate:
