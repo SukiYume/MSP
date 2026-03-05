@@ -9,7 +9,6 @@ from scipy import interpolate, signal, stats
 from .core import normalize, save_audio, to_profile
 from .hub import get_instrument_path
 
-
 _WAVE_PEAK = 0.95
 
 
