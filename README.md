@@ -58,6 +58,18 @@ pip install astrosonify[astronify]
 pip install astrosonify[all]
 ```
 
+### Development setup (reproducible test path)
+
+```bash
+python -m pip install --upgrade pip
+pip install -e .[dev]
+pytest -q
+```
+
+Notes:
+- `soundfile` may require system libraries (`libsndfile`) on some platforms.
+- Optional method extras are separate by design: `astronify`, `hifigan`, `musicnet`.
+
 ## Quick Start
 
 ### Python API
@@ -81,7 +93,7 @@ audio, sr = asf.griffinlim(data, sr=48000, n_iter=200)
 # Method 4: HiFi-GAN neural vocoder (requires torch)
 audio, sr = asf.hifigan(data)
 
-# Method 5: WaveNet music style transfer (requires torch + CUDA)
+# Method 5: WaveNet music style transfer (torch required, CUDA recommended)
 audio, sr = asf.musicnet("input.wav", decoder_id=2)
 
 # Save output
@@ -121,7 +133,7 @@ All `--input` paths in CLI commands now use existence validation for clearer use
 | 2 | Amplitude modulation | `amplitude_modulate()` | core |
 | 3 | Griffin-Lim vocoder | `griffinlim()` | core |
 | 4 | HiFi-GAN neural vocoder | `hifigan()` | torch, scikit-image |
-| 5 | WaveNet style transfer | `musicnet()` | torch, tqdm, CUDA |
+| 5 | WaveNet style transfer | `musicnet()` | torch, tqdm (CUDA optional, faster) |
 
 ### Input Handling
 

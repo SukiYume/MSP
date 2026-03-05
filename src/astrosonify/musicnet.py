@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pathlib
-import platform
+import pickle
 import numpy as np
 from pathlib import Path
 
@@ -43,6 +43,28 @@ STYLE_NAMES = {
 }
 
 
+class _PathCompatUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == "pathlib" and name == "PosixPath":
+            return pathlib.PurePosixPath
+        return super().find_class(module, name)
+
+
+class _PathCompatPickleModule:
+    Unpickler = _PathCompatUnpickler
+
+
+def _load_checkpoint(torch, checkpoint_path: str):
+    try:
+        return torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    except TypeError:
+        return torch.load(
+            checkpoint_path,
+            map_location="cpu",
+            pickle_module=_PathCompatPickleModule,
+        )
+
+
 def musicnet(
     input_audio: str | Path | np.ndarray,
     decoder_id: int = 2,
@@ -55,7 +77,7 @@ def musicnet(
     """Apply music style transfer using WaveNet encoder-decoder.
 
     Requires: pip install astrosonify[musicnet]
-    Requires CUDA GPU for inference.
+    Runs on CPU or CUDA (CUDA recommended for speed).
 
     Args:
         input_audio: Path to WAV file, or 1D numpy audio array.
@@ -77,78 +99,60 @@ def musicnet(
         raise ValueError(f"decoder_id must be 0-5. Available styles: {STYLE_NAMES}")
     if checkpoint_type not in ("bestmodel", "lastmodel"):
         raise ValueError("checkpoint_type must be 'bestmodel' or 'lastmodel'")
-    if not torch.cuda.is_available():
-        raise RuntimeError(
-            "musicnet requires a CUDA-capable GPU. "
-            "No CUDA device detected in current environment."
-        )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Handle Windows PosixPath issue with torch.load
-    posix_backup = None
-    if platform.system() == "Windows":
-        posix_backup = pathlib.PosixPath
-        pathlib.PosixPath = pathlib.WindowsPath
+    # Download model files
+    checkpoint_file = f"{checkpoint_type}_{decoder_id}.pth"
+    checkpoint_path = get_model_path("musicnet", checkpoint_file)
+    args_path = get_model_path("musicnet", "args.json")
 
-    try:
-        # Download model files
-        checkpoint_file = f"{checkpoint_type}_{decoder_id}.pth"
-        checkpoint_path = get_model_path("musicnet", checkpoint_file)
-        args_path = get_model_path("musicnet", "args.json")
+    from .models.musicnet import wavenet_models
+    from .models.musicnet.utils import mu_law, inv_mu_law
+    from .models.musicnet.wavenet import WaveNet
+    from .models.musicnet.wavenet_generator import WavenetGenerator
 
-        from .models.musicnet import wavenet_models
-        from .models.musicnet.utils import mu_law, inv_mu_law
-        from .models.musicnet.wavenet import WaveNet
-        from .models.musicnet.wavenet_generator import WavenetGenerator
+    import json
+    import argparse
+    with open(args_path) as f:
+        args_data = json.load(f)
+    model_args = argparse.Namespace(**args_data["args"])
 
-        import json
-        import argparse
-        with open(args_path) as f:
-            args_data = json.load(f)
-        model_args = argparse.Namespace(**args_data["args"])
+    encoder = wavenet_models.Encoder(model_args)
+    state = _load_checkpoint(torch, checkpoint_path)
+    encoder.load_state_dict(state["encoder_state"])
+    encoder.eval()
+    encoder = encoder.to(device)
 
-        encoder = wavenet_models.Encoder(model_args)
-        try:
-            state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-        except TypeError:
-            state = torch.load(checkpoint_path, map_location="cpu")
-        encoder.load_state_dict(state["encoder_state"])
-        encoder.eval()
-        encoder = encoder.cuda()
+    decoder = WaveNet(model_args)
+    decoder.load_state_dict(state["decoder_state"])
+    decoder.eval()
+    decoder = decoder.to(device)
+    decoder = WavenetGenerator(decoder, batch_size=batch_size, wav_freq=sr)
 
-        decoder = WaveNet(model_args)
-        decoder.load_state_dict(state["decoder_state"])
-        decoder.eval()
-        decoder = decoder.cuda()
-        decoder = WavenetGenerator(decoder, batch_size=batch_size, wav_freq=sr)
+    # Load audio
+    if isinstance(input_audio, (str, pathlib.Path)):
+        data, _ = librosa.load(str(input_audio), sr=sr)
+    else:
+        data = np.asarray(input_audio, dtype=np.float32)
 
-        # Load audio
-        if isinstance(input_audio, (str, pathlib.Path)):
-            data, _ = librosa.load(str(input_audio), sr=sr)
-        else:
-            data = np.asarray(input_audio, dtype=np.float32)
+    data = mu_law(data)
+    xs = torch.stack([torch.tensor(data).unsqueeze(0).float().to(device)]).contiguous()
 
-        data = mu_law(data)
-        xs = torch.stack([torch.tensor(data).unsqueeze(0).float().cuda()]).contiguous()
+    with torch.no_grad():
+        zz = torch.cat([encoder(xs_batch) for xs_batch in torch.split(xs, batch_size)], dim=0)
+        audio_res = []
+        for zz_batch in torch.split(zz, batch_size):
+            splits = torch.split(zz_batch, split_size, -1)
+            audio_data = []
+            decoder.reset()
+            for cond in splits:
+                audio_data.append(decoder.generate(cond).cpu())
+            audio_data = torch.cat(audio_data, -1)
+            audio_res.append(audio_data)
+        audio_res = torch.cat(audio_res, dim=0)
 
-        with torch.no_grad():
-            zz = torch.cat([encoder(xs_batch) for xs_batch in torch.split(xs, batch_size)], dim=0)
-            audio_res = []
-            for zz_batch in torch.split(zz, batch_size):
-                splits = torch.split(zz_batch, split_size, -1)
-                audio_data = []
-                decoder.reset()
-                for cond in splits:
-                    audio_data.append(decoder.generate(cond).cpu())
-                audio_data = torch.cat(audio_data, -1)
-                audio_res.append(audio_data)
-            audio_res = torch.cat(audio_res, dim=0)
-
-        audio = inv_mu_law(audio_res.cpu().numpy()).squeeze()
-        audio = audio.astype(np.float32)
-
-    finally:
-        if posix_backup is not None:
-            pathlib.PosixPath = posix_backup
+    audio = inv_mu_law(audio_res.cpu().numpy()).squeeze()
+    audio = audio.astype(np.float32)
 
     if output is not None:
         save_audio(audio, sr, output)

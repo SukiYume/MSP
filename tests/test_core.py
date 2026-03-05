@@ -42,6 +42,20 @@ class TestDelBurst:
         result = del_burst(data)
         assert result.shape == (100, 50)
 
+    def test_percentile_clip_matches_numpy_percentile(self):
+        data = np.arange(1, 17, dtype=np.float64).reshape(4, 4)
+        exposure_cut = 4
+
+        result = del_burst(data, exposure_cut=exposure_cut)
+
+        col_mean = np.mean(data, axis=0)
+        scaled = data / col_mean
+        lower = np.percentile(scaled, 100.0 / exposure_cut)
+        upper = np.percentile(scaled, 100.0 * (exposure_cut - 1) / exposure_cut)
+        expected = normalize(np.clip(scaled, lower, upper))
+
+        np.testing.assert_allclose(result, expected)
+
 
 class TestRebinSpectrogram:
     def test_downsample_both_axes(self):

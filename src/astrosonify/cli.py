@@ -22,7 +22,7 @@ def list_methods():
         ("amplitude", "Amplitude-modulated sine wave"),
         ("griffinlim", "Griffin-Lim phase reconstruction vocoder"),
         ("hifigan", "HiFi-GAN neural vocoder (requires torch)"),
-        ("musicnet", "WaveNet music style transfer (requires torch + CUDA)"),
+        ("musicnet", "WaveNet music style transfer (requires torch; CUDA recommended)"),
     ]
     for name, desc in methods:
         click.echo(f"  {name:12s}  {desc}")
@@ -31,12 +31,12 @@ def list_methods():
 @main.command()
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--sr", default=48000, help="Sample rate (Hz)")
-@click.option("--duration", default=10.0, help="Duration (seconds)")
-@click.option("--repeat", default=10, help="Profile repeat count")
+@click.option("--sr", default=48000, type=click.IntRange(1), help="Sample rate (Hz)")
+@click.option("--duration", default=10.0, type=click.FloatRange(min=0.001), help="Duration (seconds)")
+@click.option("--repeat", default=10, type=click.IntRange(1), help="Profile repeat count")
 @click.option("--instrument", default="violin", help="Instrument (violin/piano)")
 @click.option("--no-instrument", is_flag=True, help="Disable instrument convolution")
-@click.option("--downsample", default=None, type=int, help="Time downsample factor")
+@click.option("--downsample", default=None, type=click.IntRange(1), help="Time downsample factor")
 def profile(input_path, output_path, sr, duration, repeat, instrument, no_instrument, downsample):
     """Sonify using pulse profile to waveform (Method 1)."""
     from .profile import profile_to_wave
@@ -50,8 +50,8 @@ def profile(input_path, output_path, sr, duration, repeat, instrument, no_instru
 @main.command()
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--note-spacing", default=0.01, type=float, help="Seconds between notes")
-@click.option("--downsample", default=10, type=int, help="Time downsample factor")
+@click.option("--note-spacing", default=0.01, type=click.FloatRange(min=1e-5), help="Seconds between notes")
+@click.option("--downsample", default=10, type=click.IntRange(1), help="Time downsample factor")
 def astronify(input_path, output_path, note_spacing, downsample):
     """Sonify using astronify pitch mapping (Method 0)."""
     from .astronify_method import astronify_sonify
@@ -69,10 +69,10 @@ def astronify(input_path, output_path, note_spacing, downsample):
 @main.command()
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--sr", default=48000, help="Sample rate (Hz)")
-@click.option("--duration", default=2.0, help="Duration (seconds)")
-@click.option("--freq", default=1000.0, help="Carrier frequency (Hz)")
-@click.option("--downsample", default=None, type=int, help="Time downsample factor")
+@click.option("--sr", default=48000, type=click.IntRange(1), help="Sample rate (Hz)")
+@click.option("--duration", default=2.0, type=click.FloatRange(min=0.001), help="Duration (seconds)")
+@click.option("--freq", default=1000.0, type=click.FloatRange(min=1e-3), help="Carrier frequency (Hz)")
+@click.option("--downsample", default=None, type=click.IntRange(1), help="Time downsample factor")
 def amplitude(input_path, output_path, sr, duration, freq, downsample):
     """Sonify using amplitude modulation (Method 2)."""
     from .amplitude import amplitude_modulate
@@ -85,12 +85,12 @@ def amplitude(input_path, output_path, sr, duration, freq, downsample):
 @main.command()
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--sr", default=48000, help="Sample rate (Hz)")
-@click.option("--n-iter", default=200, help="Griffin-Lim iterations")
-@click.option("--n-mels", default=512, help="Number of mel bands")
-@click.option("--n-fft", default=4096, help="FFT size")
-@click.option("--time-rebin", default=None, type=int, help="Time downsample bins")
-@click.option("--freq-rebin", default=None, type=int, help="Freq downsample bins")
+@click.option("--sr", default=48000, type=click.IntRange(1), help="Sample rate (Hz)")
+@click.option("--n-iter", default=200, type=click.IntRange(1), help="Griffin-Lim iterations")
+@click.option("--n-mels", default=512, type=click.IntRange(1), help="Number of mel bands")
+@click.option("--n-fft", default=4096, type=click.IntRange(2), help="FFT size")
+@click.option("--time-rebin", default=None, type=click.IntRange(1), help="Time downsample bins")
+@click.option("--freq-rebin", default=None, type=click.IntRange(1), help="Freq downsample bins")
 @click.option("--clean", is_flag=True, help="Apply burst cleaning")
 def griffinlim(input_path, output_path, sr, n_iter, n_mels, n_fft, time_rebin, freq_rebin, clean):
     """Sonify using Griffin-Lim vocoder (Method 3)."""
@@ -104,7 +104,7 @@ def griffinlim(input_path, output_path, sr, n_iter, n_mels, n_fft, time_rebin, f
 @main.command()
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--time-rebin", default=None, type=int, help="Time downsample bins")
+@click.option("--time-rebin", default=None, type=click.IntRange(1), help="Time downsample bins")
 @click.option("--clean", is_flag=True, help="Apply burst cleaning")
 def hifigan(input_path, output_path, time_rebin, clean):
     """Sonify using HiFi-GAN neural vocoder (Method 4)."""
@@ -117,9 +117,9 @@ def hifigan(input_path, output_path, time_rebin, clean):
 @main.command()
 @click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .wav file")
 @click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--decoder-id", default=2, type=int, help="Style decoder (0-5)")
+@click.option("--decoder-id", default=2, type=click.IntRange(0, 5), help="Style decoder (0-5)")
 @click.option("--checkpoint-type", default="bestmodel", help="bestmodel or lastmodel")
-@click.option("--sr", default=48000, help="Sample rate (Hz)")
+@click.option("--sr", default=48000, type=click.IntRange(1), help="Sample rate (Hz)")
 def musicnet(input_path, output_path, decoder_id, checkpoint_type, sr):
     """Sonify using WaveNet style transfer (Method 5)."""
     from .musicnet import musicnet as mn

@@ -19,6 +19,12 @@ class TestGetDataPath:
         result = get_data_path("Burst.npy")
         assert isinstance(result, str)
 
+    @patch("astrosonify.hub.hf_hub_download")
+    def test_wraps_download_error_with_actionable_message(self, mock_download):
+        mock_download.side_effect = RuntimeError("network down")
+        with pytest.raises(RuntimeError, match="Failed to download"):
+            get_data_path("Burst.npy")
+
 
 class TestGetModelPath:
     @patch("astrosonify.hub.hf_hub_download")

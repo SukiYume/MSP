@@ -58,6 +58,18 @@ pip install astrosonify[astronify]
 pip install astrosonify[all]
 ```
 
+### 开发环境（可复现测试最短路径）
+
+```bash
+python -m pip install --upgrade pip
+pip install -e .[dev]
+pytest -q
+```
+
+说明：
+- 在部分平台上，`soundfile` 可能需要系统层 `libsndfile` 依赖。
+- 可选方法依赖默认拆分安装：`astronify`、`hifigan`、`musicnet`。
+
 ## 快速开始
 
 ### Python API
@@ -81,7 +93,7 @@ audio, sr = asf.griffinlim(data, sr=48000, n_iter=200)
 # 方法 4：HiFi-GAN 神经声码器（需要 torch）
 audio, sr = asf.hifigan(data)
 
-# 方法 5：WaveNet 音乐风格迁移（需要 torch + CUDA）
+# 方法 5：WaveNet 音乐风格迁移（需要 torch，推荐 CUDA）
 audio, sr = asf.musicnet("input.wav", decoder_id=2)
 
 # 保存输出
@@ -121,7 +133,7 @@ astrosonify download-examples --dest ./data/
 | 2 | 振幅调制 | `amplitude_modulate()` | 无 |
 | 3 | Griffin-Lim 声码器 | `griffinlim()` | 无 |
 | 4 | HiFi-GAN 神经声码器 | `hifigan()` | torch, scikit-image |
-| 5 | WaveNet 风格迁移 | `musicnet()` | torch, tqdm, CUDA |
+| 5 | WaveNet 风格迁移 | `musicnet()` | torch, tqdm（CUDA 可选但更快） |
 
 ### 输入处理
 

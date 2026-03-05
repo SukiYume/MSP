@@ -10,6 +10,9 @@ from .core import to_profile, normalize, save_audio
 from .hub import get_instrument_path
 
 
+_WAVE_PEAK = 0.95
+
+
 def _read_wave(file: str) -> np.ndarray:
     """Read a WAV file and return mono float waveform."""
     wave_data, _ = sf.read(file, always_2d=True)
@@ -53,8 +56,7 @@ def profile_to_wave(
     wave_time = np.clip(wave_time, time_axis[0], time_axis[-1])
     wave_raw = f_interp(wave_time)
 
-    wave_raw = normalize(wave_raw) * 60000
-    wave_raw = wave_raw.astype(np.int16)
+    wave_raw = normalize(wave_raw)
 
     if instrument is not None:
         instrument_path = get_instrument_path(instrument)
@@ -74,10 +76,10 @@ def profile_to_wave(
             else:
                 sound_norm = sounds
             wave_raw = signal.convolve(wave_raw.astype(np.float64), sound_norm, mode="same")
-            wave_raw = normalize(wave_raw) * 30000
-            wave_raw = wave_raw.astype(np.int16)
+            wave_raw = normalize(wave_raw)
 
-    audio = wave_raw.astype(np.float32) / 32768.0
+    wave_centered = wave_raw * 2.0 - 1.0
+    audio = (wave_centered * _WAVE_PEAK).astype(np.float32)
 
     if output is not None:
         save_audio(audio, sr, output)

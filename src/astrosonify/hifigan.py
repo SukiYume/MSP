@@ -38,7 +38,8 @@ def _rescale_data(data: np.ndarray, resize_fn) -> np.ndarray:
     h, w = data.shape
     # Parameters below follow original model preprocessing convention.
     # They are preserved for compatibility with the released checkpoint.
-    a = np.histogram(data.ravel(), bins=max(int(h * w / 100), 1))
+    n_bins = min(max(int(h * w / 100), 1), 4096)
+    a = np.histogram(data.ravel(), bins=n_bins)
     b, c = (a[1][1:] + a[1][:-1]) / 2, a[0]
     d = 0.6 - b[np.argmax(c)]
     data = (data + d) * 12 - 10.5
@@ -104,10 +105,12 @@ def hifigan(
     from .models.hifigan.generator import Generator
 
     h = AttrDict(config)
-    torch.manual_seed(h.seed)
+    seed = int(config["seed"])
+    sampling_rate = int(config["sampling_rate"])
+    torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():
-        torch.cuda.manual_seed(h.seed)
+        torch.cuda.manual_seed(seed)
 
     generator = Generator(h).to(device)
     state_dict = _torch_load_state_dict(torch, checkpoint_path, device)
@@ -129,7 +132,7 @@ def hifigan(
         audio = audio / peak * 0.9
     audio = audio.astype(np.float32)
 
-    sr = h.sampling_rate
+    sr = sampling_rate
 
     if output is not None:
         save_audio(audio, sr, output)

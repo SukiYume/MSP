@@ -25,13 +25,13 @@ def del_burst(data: np.ndarray, exposure_cut: int = 25) -> np.ndarray:
         exposure_cut: Percentile cut parameter.
     """
     data = data.astype(np.float64)
-    h, w = data.shape
     col_mean = np.mean(data, axis=0)
     col_mean[col_mean == 0] = 1.0
     data = data / col_mean
-    flat = np.sort(data.flatten())
-    vmin = flat[int(h * w / exposure_cut)]
-    vmax = flat[int(h * w / exposure_cut * (exposure_cut - 1))]
+    lower_percentile = 100.0 / exposure_cut
+    upper_percentile = 100.0 * (exposure_cut - 1) / exposure_cut
+    vmin = np.percentile(data, lower_percentile)
+    vmax = np.percentile(data, upper_percentile)
     data = np.clip(data, vmin, vmax)
     return normalize(data)
 

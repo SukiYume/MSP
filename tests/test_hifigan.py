@@ -66,7 +66,7 @@ class _FakeTorch:
         return _FakeTensor(x)
 
 
-class _FakeAttrDict(dict):
+class _FakeAttrDict(dict[str, object]):
     def __getattr__(self, item):
         return self[item]
 
@@ -116,9 +116,9 @@ def fake_hifigan_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(hifigan_module, "get_model_path", _fake_get_model_path)
 
     fake_env_module = types.ModuleType("astrosonify.models.hifigan.env")
-    fake_env_module.AttrDict = _FakeAttrDict
+    setattr(fake_env_module, "AttrDict", _FakeAttrDict)
     fake_generator_module = types.ModuleType("astrosonify.models.hifigan.generator")
-    fake_generator_module.Generator = _FakeGenerator
+    setattr(fake_generator_module, "Generator", _FakeGenerator)
 
     monkeypatch.setitem(sys.modules, "astrosonify.models.hifigan.env", fake_env_module)
     monkeypatch.setitem(sys.modules, "astrosonify.models.hifigan.generator", fake_generator_module)
@@ -133,6 +133,24 @@ class TestHifiGAN:
 
         out = hifigan_module._rescale_data(spec, fake_resize)
         assert out.shape == (1, 80, 128)
+
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            np.zeros((64, 128), dtype=np.float64),
+            np.pad(np.array([[1.0]], dtype=np.float64), ((0, 63), (0, 127))),
+            np.random.default_rng(123).lognormal(mean=0.0, sigma=4.0, size=(64, 128)),
+        ],
+    )
+    def test_rescale_data_handles_extreme_distributions(self, spec):
+        def fake_resize(data, shape):
+            return np.resize(data, shape)
+
+        out = hifigan_module._rescale_data(spec, fake_resize)
+        assert out.shape == (1, 80, spec.shape[0])
+        assert np.all(np.isfinite(out))
+        assert out.min() >= -11.0
+        assert out.max() <= 1.6
 
     def test_rejects_1d_input(self, monkeypatch):
         monkeypatch.setattr(hifigan_module, "_require_torch", lambda: _FakeTorch)

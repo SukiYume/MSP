@@ -89,3 +89,26 @@ class TestCLI:
         out = str(tmp_path / "out.wav")
         result = runner.invoke(main, ["griffinlim", "--output", out])
         assert result.exit_code != 0
+
+    def test_musicnet_decoder_id_range_validation(self, runner, tmp_path):
+        in_wav = str(tmp_path / "in.wav")
+        out = str(tmp_path / "out.wav")
+        np.save(str(tmp_path / "dummy.npy"), np.zeros(8, dtype=np.float32))
+        with open(in_wav, "wb") as f:
+            f.write(b"RIFF")
+
+        result = runner.invoke(
+            main,
+            ["musicnet", "--input", in_wav, "--output", out, "--decoder-id", "6"],
+        )
+        assert result.exit_code != 0
+        assert "not in the range" in result.output
+
+    def test_profile_duration_range_validation(self, runner, profile_file, tmp_path):
+        out = str(tmp_path / "out.wav")
+        result = runner.invoke(
+            main,
+            ["profile", "--input", profile_file, "--output", out, "--duration", "-1"],
+        )
+        assert result.exit_code != 0
+        assert "not in the range" in result.output
