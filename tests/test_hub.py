@@ -1,7 +1,17 @@
+import wave
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from huggingface_hub.errors import LocalEntryNotFoundError, EntryNotFoundError
-from radiosonify.hub import get_data_path, get_model_path, get_instrument_path, load_example
+from huggingface_hub.utils import LocalEntryNotFoundError
+
+from radiosonify.hub import (
+    REVISION,
+    get_data_path,
+    get_instrument_path,
+    get_model_path,
+    load_example,
+)
 
 REPO_ID = "TorchLight/radiosonify"
 
@@ -12,6 +22,7 @@ class TestGetDataPath:
         mock_download.return_value = "/fake/path/Burst.npy"
         result = get_data_path("Burst.npy")
         mock_download.assert_called_once()
+        assert mock_download.call_args.kwargs["revision"] == REVISION
         assert result == "/fake/path/Burst.npy"
 
     @patch("radiosonify.hub.hf_hub_download")
@@ -21,13 +32,33 @@ class TestGetDataPath:
         assert isinstance(result, str)
 
     @patch("radiosonify.hub.hf_hub_download")
-    def test_wraps_download_error_with_actionable_message(self, mock_download):
+    @patch("radiosonify.hub.time.sleep")
+    def test_retries_online_local_entry_error(self, mock_sleep, mock_download):
         mock_download.side_effect = [
             LocalEntryNotFoundError("not in cache"),
-            RuntimeError("network down"),
+            LocalEntryNotFoundError("network unavailable"),
+            "/fake/path/Burst.npy",
         ]
-        with pytest.raises(RuntimeError, match="Failed to download"):
+
+        assert get_data_path("Burst.npy") == "/fake/path/Burst.npy"
+        assert mock_download.call_count == 3
+        mock_sleep.assert_called_once_with(0.3)
+
+    @patch("radiosonify.hub.hf_hub_download")
+    @patch("radiosonify.hub.time.sleep")
+    def test_wraps_download_error_with_actionable_message(self, mock_sleep, mock_download):
+        mock_download.side_effect = [
+            LocalEntryNotFoundError("not in cache"),
+            LocalEntryNotFoundError("network down"),
+            LocalEntryNotFoundError("still offline"),
+        ]
+
+        with pytest.raises(RuntimeError, match="Failed to download") as error:
             get_data_path("Burst.npy")
+
+        assert "not found in Hugging Face repo" not in str(error.value)
+        assert mock_download.call_count == 3
+        mock_sleep.assert_called_once_with(0.3)
 
 
 class TestGetModelPath:
@@ -41,11 +72,35 @@ class TestGetModelPath:
 
 class TestGetInstrumentPath:
     @patch("radiosonify.hub.hf_hub_download")
-    def test_violin(self, mock_download):
-        mock_download.return_value = "/fake/path/vio.wav"
+    def test_violin_is_generated_locally_without_a_download(
+        self, mock_download, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr("radiosonify.hub.CACHE_DIR", str(tmp_path))
         result = get_instrument_path("violin")
-        mock_download.assert_called_once()
-        assert result == "/fake/path/vio.wav"
+        generated = Path(result)
+
+        mock_download.assert_not_called()
+        assert generated.is_file()
+        assert generated.name == "violin.wav"
+        with wave.open(str(generated), "rb") as wav:
+            assert wav.getnchannels() == 1
+            assert wav.getsampwidth() == 2
+            assert wav.getframerate() == 48_000
+            assert wav.getnframes() > 0
+
+    def test_generated_instrument_is_deterministic_and_reuses_the_cache(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr("radiosonify.hub.CACHE_DIR", str(tmp_path))
+        first = Path(get_instrument_path("piano"))
+        first_bytes = first.read_bytes()
+        first_mtime = first.stat().st_mtime_ns
+
+        second = Path(get_instrument_path("piano"))
+
+        assert second == first
+        assert second.read_bytes() == first_bytes
+        assert second.stat().st_mtime_ns == first_mtime
 
     def test_unknown_instrument_raises(self):
         with pytest.raises(ValueError, match="Unknown instrument"):

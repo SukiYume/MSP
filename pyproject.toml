@@ -1,44 +1,62 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
 name = "radiosonify"
-version = "0.1.2"
-description = "Methods for Sonifying Pulse - Convert radio telescope data into audible sound"
+dynamic = ["version"]
+description = "Unified, duration-aware sonification for radio profiles and dynamic spectra"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT AND CC-BY-NC-4.0"
+license-files = [
+    "LICENSE",
+    "src/radiosonify/models/hifigan/LICENSE",
+    "src/radiosonify/models/musicnet/LICENSE",
+]
 requires-python = ">=3.9"
 authors = [
-    {name = "XiaoQing", email = ""},
+    {name = "XiaoQing"},
 ]
-keywords = ["astronomy", "sonification", "radio-pulse", "audio", "FRB"]
+keywords = [
+    "astronomy",
+    "sonification",
+    "radio-pulse",
+    "dynamic-spectrum",
+    "audio",
+    "FRB",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Astronomy",
     "Topic :: Multimedia :: Sound/Audio",
 ]
 dependencies = [
-    "numpy",
-    "scipy",
-    "librosa",
-    "soundfile",
-    "huggingface_hub",
-    "click",
+    "numpy>=1.23",
+    "scipy>=1.9",
+    "librosa>=0.10",
+    "soundfile>=0.12",
+    "huggingface_hub>=0.20",
+    "click>=8.1",
 ]
 
 [project.optional-dependencies]
-hifigan = ["torch", "scikit-image"]
-musicnet = ["torch", "tqdm"]
-all = ["torch", "scikit-image", "tqdm"]
-dev = ["pytest", "pytest-cov", "ruff"]
+hifigan = ["torch>=2.0", "scikit-image>=0.20"]
+musicnet = ["torch>=2.0", "tqdm>=4.64"]
+all = ["radiosonify[hifigan,musicnet]"]
+dev = [
+    "build>=1.2",
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+    "twine>=5.1",
+]
 
 [project.scripts]
 radiosonify = "radiosonify.cli:main"
@@ -46,9 +64,23 @@ radiosonify = "radiosonify.cli:main"
 [project.urls]
 Homepage = "https://github.com/SukiYume/MSP"
 Repository = "https://github.com/SukiYume/MSP"
+Issues = "https://github.com/SukiYume/MSP/issues"
+"Models and data" = "https://huggingface.co/TorchLight/radiosonify"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/radiosonify"]
+include = [
+    "src/radiosonify",
+    "tests",
+    "examples",
+    "assets",
+    "LICENSE",
+    "MODEL_ASSETS.md",
+    "README_CN.md",
+    "THIRD_PARTY_NOTICES.md",
+]
+
+[tool.hatch.version]
+path = "src/radiosonify/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/radiosonify"]
@@ -62,7 +94,13 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py39"
 line-length = 100
+# Checkpoint-compatible upstream model definitions retain their source layout.
+# See src/radiosonify/models/VENDORED.md; wrappers and tests remain linted.
+exclude = ["src/radiosonify/models"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]
+
+[tool.ruff.format]
+line-ending = "lf"

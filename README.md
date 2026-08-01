@@ -1,229 +1,398 @@
-<div align="center">
-
-<div align="center"><img style="border-radius:50%;border: royalblue dashed 1px;padding: 5px" src="assets/Burst.png" alt="RMS" width="140px" /></div>
-
-# RadioSonify
-
-_Sonifying radio pulses with multiple methods_
-
-</div>
+<h1 align="center">MSP · RadioSonify</h1>
 
 <p align="center">
-  <a href="https://pypi.org/project/radiosonify/">
-    <img src="https://img.shields.io/pypi/v/radiosonify?color=royalblue" alt="PyPI">
-  </a>
-  <a href="https://github.com/SukiYume/MSP">
-    <img src="https://img.shields.io/badge/MethodSonifyPulse-MSP-royalblue" alt="MSP">
-  </a>
-  <a href="./LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-  </a>
+  <img src="https://raw.githubusercontent.com/SukiYume/MSP/main/assets/Burst.png" alt="Radio pulse visualization" width="180">
 </p>
 
 <p align="center">
-  <a href="./README_CN.md" target="_blank">切换到中文</a>
+  <strong>Turn radio pulse data into audio you can listen to</strong><br>
+  A profile or a dynamic spectrum goes in. A WAV of the duration you choose comes out.
 </p>
 
-## Description
+<p align="center">
+  <img alt="Python 3.9+" src="https://img.shields.io/badge/Python-3.9%2B-3776ab?logo=python&logoColor=white">
+  <a href="https://huggingface.co/TorchLight/radiosonify"><img alt="Models and data" src="https://img.shields.io/badge/Models%20%26%20Data-Hugging%20Face-ffd21e"></a>
+  <a href="https://github.com/SukiYume/MSP/blob/main/THIRD_PARTY_NOTICES.md"><img alt="Mixed license" src="https://img.shields.io/badge/License-MIT%20%2B%20CC--BY--NC--4.0-orange"></a>
+</p>
 
-Radio telescopes digitize and record electromagnetic signals, but the received frequencies are typically outside the range of human hearing. The raw data is usually Fourier-transformed into the time-frequency domain with phase information discarded to save storage. This means the original waveform cannot be recovered.
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#your-data">Data</a> ·
+  <a href="#methods">Methods</a> ·
+  <a href="#duration-speed-and-repeat">Timing</a> ·
+  <a href="#what-you-get-back">Result</a> ·
+  <a href="https://github.com/SukiYume/MSP/blob/main/README_CN.md">中文</a>
+</p>
 
-**RadioSonify** provides 6 methods to convert such phase-less time-frequency data into audible sound, ranging from simple profile mapping to neural vocoder reconstruction.
+---
 
-## What's New (v0.1.2)
+## What MSP does
 
-- Fixed `rebin_spectrogram()` edge-case crashes when target bins exceed input dimensions.
-- Corrected `amplitude_modulate(freq=...)` to map `freq` directly to physical Hz.
-- Added explicit CUDA availability check in `musicnet()`.
-- Added safer model loading path using `torch.load(..., weights_only=True)` when supported.
-- Added cache-dir override support with `RADIOSONIFY_CACHE_DIR`.
+Radio telescopes record scientific arrays. MSP maps two of those arrays onto sound:
 
-## Installation
+- a one-dimensional **pulse profile**, and
+- a two-dimensional **dynamic spectrum** (time × frequency).
 
-```bash
-# Core package (methods 1–3)
-pip install radiosonify
+You supply the array and the physical time span it covers. MSP picks a suitable
+method, synthesizes the audio at exactly the duration you ask for, and returns
+the waveform together with every parameter used to produce it.
 
-# With HiFi-GAN neural vocoder (method 4)
-pip install radiosonify[hifigan]
-
-# With MusicNet style transfer (method 5)
-pip install radiosonify[musicnet]
-
-# Everything
-pip install radiosonify[all]
+```mermaid
+flowchart LR
+    A["Profile · 1-D"] --> C["SonificationInput"]
+    B["Dynamic spectrum · time × frequency"] --> C
+    C --> D["Choose method + parameters"]
+    D --> E["Fit duration × repeat ÷ speed"]
+    E --> F["WAV + reproducibility metadata"]
+    F -. optional .-> G["MusicNet styling"]
 ```
 
-### Development setup (reproducible test path)
+## Install
+
+Install a released package from PyPI:
 
 ```bash
-python -m pip install --upgrade pip
-pip install -e .[dev]
-pytest -q
+python -m pip install radiosonify
 ```
 
-Notes:
-- `soundfile` may require system libraries (`libsndfile`) on some platforms.
-- Optional method extras are separate by design: `hifigan`, `musicnet`.
+The `profile`, `amplitude`, and `griffinlim` methods run on this base install.
+Add the neural backends when you want them:
 
-## Quick Start
+```bash
+python -m pip install "radiosonify[hifigan]"
+python -m pip install "radiosonify[musicnet]"
+python -m pip install "radiosonify[all]"
+```
 
-### Python API
+Install a PyTorch build that matches your CPU or CUDA environment.
+
+For an editable source checkout, clone the repository and use
+`python -m pip install -e .` (or `-e ".[all,dev]"`).
+
+Example arrays and pretrained weights download from
+[`TorchLight/radiosonify`](https://huggingface.co/TorchLight/radiosonify) on
+first use, pinned to one revision. They cache in `~/.cache/radiosonify`; set
+`RADIOSONIFY_CACHE_DIR` before importing to choose another location.
+Instrument responses are generated deterministically on the local machine and
+use no downloaded sound recording. See
+[MODEL_ASSETS.md](https://github.com/SukiYume/MSP/blob/main/MODEL_ASSETS.md) for
+asset provenance and licensing.
+
+## Quick start
+
+From a source checkout, run the bundled example to hear the workflow end to
+end:
+
+```bash
+python examples/sonify_example.py
+```
+
+### Command line compatibility
+
+The `radiosonify` command from 0.1.x remains available:
+
+```bash
+radiosonify list-methods
+radiosonify amplitude --input profile.npy --output profile.wav --repeat 5
+radiosonify griffinlim --input spectrum.npy --output spectrum.wav
+radiosonify download-examples --dest ./data
+```
+
+Use `radiosonify COMMAND --help` for all parameters. The Python `sonify()` API
+is preferred for duration-aware workflows and complete result metadata.
+
+### A pulse profile
 
 ```python
-import radiosonify as asf
+import numpy as np
+import radiosonify as rs
 
-# Load example data from Hugging Face Hub
-data = asf.load_example("burst")        # 2D spectrogram (time x freq)
-profile = asf.load_example("profile")   # 1D pulse profile
+profile = np.load("profile.npy", allow_pickle=False)
 
-# Method 1: Profile to waveform (with violin convolution)
-audio, sr = asf.profile_to_wave(data, sr=48000, duration=10, instrument="violin")
+result = rs.sonify(
+    profile,
+    data_duration=0.725,       # physical span of the data, in seconds
+    method="auto",
+    repeat=5,                  # play the data five times
+    method_params={"freq": 880},
+    output="profile.wav",
+)
 
-# Method 2: Amplitude-modulated sine wave
-audio, sr = asf.amplitude_modulate(profile, sr=48000, duration=2, freq=1000)
-
-# Method 3: Griffin-Lim vocoder
-audio, sr = asf.griffinlim(data, sr=48000, n_iter=200)
-
-# Method 4: HiFi-GAN neural vocoder (requires torch)
-audio, sr = asf.hifigan(data)
-
-# Method 5: WaveNet music style transfer (torch required, CUDA recommended)
-audio, sr = asf.musicnet("input.wav", decoder_id=2)
-
-# Save output
-asf.save_audio(audio, sr, "output.wav")
+print(result.method, result.output_duration, result.sample_rate)
 ```
 
-### CLI
+### A dynamic spectrum
 
-```bash
-# List available methods
-radiosonify list-methods
+```python
+from pathlib import Path
 
-# Sonify with Griffin-Lim
-radiosonify griffinlim --input burst.npy --output burst.wav --sr 48000
+import numpy as np
+import radiosonify as rs
 
-# Sonify with profile method
-radiosonify profile --input burst.npy --output profile.wav --instrument violin
+dynamic_spectrum = np.load("observation.npy", allow_pickle=False)
 
-# Sonify with amplitude modulation
-radiosonify amplitude --input profile.npy --output amp.wav --freq 1000
+source = rs.SonificationInput(
+    dynamic_spectrum,
+    duration=4.2,
+    data_type="dynamic_spectrum",   # inferred from shape when omitted
+    name="candidate-01",
+)
 
-# Download example data
-radiosonify download-examples --dest ./data/
+result = rs.sonify(
+    source,
+    method="griffinlim",
+    speed=2.0,                      # 2× speed gives 2.1 s of audio
+    method_params={"n_iter": 32, "time_rebin": 256, "freq_rebin": 256},
+    output=Path("audio") / "candidate-01.wav",
+)
 ```
 
-All `--input` paths in CLI commands now use existence validation for clearer user-facing errors.
+## Your data
+
+| Type | Shape | Axis meaning |
+|---|---:|---|
+| `profile` | `(time,)` | One intensity value per phase or time bin |
+| `dynamic_spectrum` | `(time, frequency)` | Rows advance in time, columns advance in frequency |
+
+MSP accepts real, finite, non-empty arrays. One-dimensional input reads as a
+profile and two-dimensional input as a dynamic spectrum, so `data_type` stays
+optional whenever the shape already says which one you have.
+
+Array shape carries no time calibration, so `data_duration` is required. When
+you sonify a slice of a longer observation, pass the duration of that slice.
+
+`SonificationInput` copies the array and marks the copy read-only, which keeps
+a conversion stable while it runs.
 
 ## Methods
 
-| # | Method | Function | Dependencies |
-|---|--------|----------|--------------|
-| 1 | Profile to waveform | `profile_to_wave()` | core |
-| 2 | Amplitude modulation | `amplitude_modulate()` | core |
-| 3 | Griffin-Lim vocoder | `griffinlim()` | core |
-| 4 | HiFi-GAN neural vocoder | `hifigan()` | torch, scikit-image |
-| 5 | WaveNet style transfer | `musicnet()` | torch, tqdm (CUDA optional, faster) |
+`method="auto"` picks a dependency-light default that suits the input:
 
-### Input Handling
+| Input | Default | Available methods |
+|---|---|---|
+| Profile | `amplitude` | `profile`, `amplitude` |
+| Dynamic spectrum | `griffinlim` | `profile`, `amplitude`, `griffinlim`, `hifigan` |
 
-- **Profile methods (1, 2)**: Accept 1D profile or 2D spectrogram (auto-averages along frequency axis)
-- **Spectrogram methods (3, 4)**: Accept 2D spectrogram (auto-rebins to target dimensions)
-- **MusicNet (5)**: Accepts WAV file path or 1D audio array
-
-All methods return `(audio_array, sample_rate)` tuple.
-
-### Length & Downsampling Reference
-
-Let input shape be `(T, F)` for 2D data, or length `N` for 1D data.
-
-| # | Method | Output sample rate | Output duration from input length | Practical downsampling target |
-|---|--------|--------------------|-----------------------------------|-------------------------------|
-| 1 | `profile_to_wave` | User-set `sr` (default 48000) | Exactly `duration` seconds (default 10s), independent of input point count after interpolation | For stable timbre/envelope, keep effective profile length `L` around 200-5000 |
-| 2 | `amplitude_modulate` | User-set `sr` (default 48000) | Exactly `duration` seconds (default 2s), independent of input point count after interpolation | Similar to method 1, keep `L` around 200-5000 |
-| 3 | `griffinlim` | User-set `sr` (default 48000) | With `time_rebin = B_t`, duration is about `B_t * (frame_length/4)`; default `frame_length=0.04`, so `≈ B_t * 0.01` sec | Set `time_rebin ≈ 100 * target_seconds`; set `freq_rebin` to 256-512 |
-| 4 | `hifigan` | From model config (`sampling_rate`, current model: 22050) | With `time_rebin = B_t`, duration is approximately `B_t * hop_size / sampling_rate`; current model uses `hop_size=256`, so `≈ B_t * 0.01161` sec | Set `time_rebin ≈ target_seconds * 22050 / 256` (about `86 * target_seconds`) |
-| 5 | `musicnet` | User-set `sr` (default 48000) | Approximately keeps input WAV duration, but quantized by model stride: output samples `≈ floor(N/800) * 800` (current `encoder_pool=800`) | Usually no extra downsampling; trim/segment long inputs before conversion |
-
-#### Legacy-compatible fixed bins (reference)
-
-For users migrating from the legacy scripts, these fixed values reproduce the same time/frequency compression behavior in tests:
-
-- Method 3 (`griffinlim`): `time_rebin=128`, `freq_rebin=512`
-- Method 4 (`hifigan`): `time_rebin=128` (frequency is always resized to 80 mel bins by the model path)
-
-These values are now used in test coverage as reproducible listenable defaults; production usage can keep them configurable.
-
-#### 2D input: recommended size for the other axis (frequency)
-
-- Methods 0/1/2: 2D input is averaged along frequency (`mean(axis=1)`), so there is no strict frequency-bin target; keep at least `F >= 32`, with `64-1024` as a common practical range.
-- Method 3 (`griffinlim`): frequency is rebinned to `freq_rebin` (or `n_mels` if unset, default `512`); recommended output frequency bins are `256-512`, with `512` for legacy alignment.
-- Method 4 (`hifigan`): preprocessing always rescales frequency to `80` mel bins; input frequency length is flexible, but `F >= 80` (commonly `256-1024`) is recommended to reduce detail loss.
-
-Practical setup: choose `time_rebin` from target duration first, then set method 3 `freq_rebin` to `256` or `512`; for method 4, keep original frequency resolution reasonably high.
-
-#### Quick reference by common input shapes
-
-> The presets below target roughly 1-3 second outputs with listenable structure retained.
-
-| Input shape `(T, F)` | Recommended for method 3 (`griffinlim`) | Recommended for method 4 (`hifigan`) | Estimated duration |
+| Method | How it sounds | What it carries | Extra |
 |---|---|---|---|
-| `(1024, 256)` | `time_rebin=100`, `freq_rebin=256` | `time_rebin=100` | M3: ~1.0s; M4: ~1.16s |
-| `(2048, 512)` | `time_rebin=128`, `freq_rebin=512` | `time_rebin=128` | M3: ~1.28s; M4: ~1.49s |
-| `(4096, 512)` | `time_rebin=200`, `freq_rebin=512` | `time_rebin=200` | M3: ~2.0s; M4: ~2.32s |
-| `(8192, 1024)` | `time_rebin=300`, `freq_rebin=512` | `time_rebin=300` | M3: ~3.0s; M4: ~3.48s |
+| `profile` | The profile shape becomes the waveform itself, optionally coloured by a violin or piano sample | Pulse timing, width, relative shape | — |
+| `amplitude` | The profile controls the loudness of a steady sine tone | Pulse strength and temporal envelope | — |
+| `griffinlim` | The full 2-D intensity map reads as a magnitude spectrogram and Griffin–Lim estimates the phase | Time–frequency evolution, including sweeps and band structure | — |
+| `hifigan` | The 2-D map runs through a pretrained neural vocoder for a more continuous texture | Time–frequency evolution | `hifigan` |
 
-Notes:
+`profile` and `amplitude` average a dynamic spectrum along frequency and work
+from the resulting time profile. `griffinlim` and `hifigan` use the full
+two-dimensional structure.
 
-- Method 3 duration is approximately `time_rebin × 0.01s` with default parameters.
-- Method 4 duration is approximately `time_rebin × 256 / 22050 ≈ time_rebin × 0.01161s`.
-- Use `freq_rebin=512` for better frequency detail, or `256` for faster/lighter runs.
+Method settings go in `method_params`. Ask the registry for the exact list any
+method accepts:
 
-### Vocoder Comparison
+```python
+for method in rs.available_methods("dynamic_spectrum"):
+    print(method.name, method.parameters, method.optional_extra)
 
-<div align="center"><img src="assets/MSPT.png" alt="Spectrogram comparison" width="800px" /></div>
+for postprocessor in rs.available_postprocessors():
+    print(postprocessor.name, postprocessor.parameters, postprocessor.optional_extra)
+```
 
-Left: original time-frequency data. Right: reconstructed spectrogram after vocoder conversion.
+### Settings worth knowing
 
-### MusicNet Style Transfer
+`time_rebin` and `freq_rebin` set target bin counts. MSP averages across the
+full axis with equal-width bins, so every input sample contributes even when
+the target divides the axis unevenly. `time_downsample` plays the same role for
+the profile methods.
 
-| Decoder ID | 0 | 1 | 2 | 3 | 4 | 5 |
-|------------|---|---|---|---|---|---|
-| Instrument | Accompaniment Violin | Solo Cello | Solo Piano | Solo Piano | String Quartet | Organ Quintet |
-| Composer | Beethoven | Bach | Bach | Beethoven | Beethoven | Cambini |
+`compression` shapes how profile intensity becomes loudness in the `amplitude`
+method, through `log1p(compression * x) / log1p(compression)`. The default
+`compression=99` lifts structure at 1% of the peak to roughly 15% of the
+envelope peak. Use `0` for a linear envelope.
 
-## Data & Models
+`clean=True` runs percentile-based cleaning before synthesis, which helps when
+a bandpass shape or narrow-band interference dominates the intensity scale.
 
-Example data and pre-trained models are hosted on [Hugging Face Hub](https://huggingface.co/TorchLight/radiosonify) and downloaded automatically on first use.
+`time_smoothing=<sigma>` in HiFi-GAN smooths along time in input bin units and
+leaves persistent per-channel structure in place.
 
-### Cache directory
+Griffin–Lim runs 64 phase-estimation iterations by default. The mel-to-linear
+approximation sets an error floor, so measure the result for your data before
+raising `n_iter`.
 
-By default, files are cached under `~/.cache/radiosonify`.
+## Duration, speed, and repeat
 
-You can override this with:
+Every method follows one rule:
+
+```text
+target duration = physical data duration × repeat ÷ speed
+target samples  = round(sample rate × target duration)
+```
+
+`speed=1` with `repeat=1` keeps the physical duration. `speed=2` plays twice as
+fast, `speed=0.5` at half speed, and `speed=0.1` stretches a millisecond-scale
+burst into something comfortable to listen to. `repeat=5` plays the data five
+times; consecutive copies join seamlessly because MSP treats the profile as
+binned data. `repeat` applies to the `profile` and `amplitude` methods.
+
+Profile mapping and amplitude modulation synthesize directly at the target
+length. Griffin–Lim and HiFi-GAN produce a method-native waveform first, and
+the timing layer resamples it to the target. That resampling behaves like a
+playback-rate change, so pitch follows duration. Set `preserve_pitch=True` to
+use a phase-vocoder time stretch instead.
+
+For the 2-D methods, `time_rebin` sets the method-native length and therefore
+influences the final pitch. `SonificationResult` records
+`method_native_samples`, `method_native_duration`, and `method_time_scale`
+(`fitted samples / native samples`) so the relationship stays visible.
+
+Each method has a native sample rate: 48 kHz for the configurable methods,
+22.05 kHz for HiFi-GAN, and 16 kHz after MusicNet. Pass `output_sr=48_000` when
+a batch of files should share one container rate. The conversion preserves
+duration and pitch, and the audible bandwidth stays at the method's native
+limit.
+
+Every unified output ends with DC removal, an edge fade of up to 5 ms, and peak
+normalization to `0.9`, at the exact target sample count.
+
+## Optional MusicNet styling
+
+MusicNet takes audio as its input, so it runs as a postprocessor on the result
+of a primary method:
+
+```python
+result = rs.sonify(
+    source,
+    method="amplitude",
+    postprocess="musicnet",
+    postprocess_params={"decoder_id": 2, "seed": 0},
+    output_sr=48_000,
+    output="styled.wav",
+)
+```
+
+Six style decoders are available; see `radiosonify.musicnet.STYLE_NAMES`.
+Generation is stochastic, and the default `seed=0` keeps repeated runs
+reproducible while leaving your global PyTorch random state untouched. Pass
+`seed=None` for fresh sampling each time. MusicNet runs at its native 16 kHz
+and at normal playback speed, and MSP applies `speed` afterwards. Long inputs
+decode in segments that stay continuous across segment boundaries.
+
+Reach for MusicNet when you want a deliberately stylized rendering, and label
+the output as such.
+
+## What you get back
+
+`sonify()` returns a `SonificationResult` carrying the audio plus the effective
+runtime settings needed to describe the conversion:
+
+- resolved data type and method;
+- physical, target, and actual output durations;
+- repeat count, speed, and pitch mode;
+- read-only effective method and postprocessor parameters;
+- native sample counts and time scales for each stage;
+- sample rate, source name, and output path.
+
+The five underlying functions stay available and return
+`(audio_array, sample_rate)`:
+
+```python
+rs.profile_to_wave(...)
+rs.amplitude_modulate(...)
+rs.griffinlim(...)
+rs.hifigan(...)
+rs.musicnet(...)
+```
+
+Use them when you want a method's native timing. Use `sonify()` when you want
+physical duration, method compatibility, and shared metadata handled for you.
+
+## Scientific notes
+
+MSP guarantees the following:
+
+- public numeric inputs are real, finite, non-empty, and dimensionally checked;
+- control parameters and the output path are validated before any expensive
+  inference begins;
+- rebinning covers the complete source axis and preserves its area mean;
+- outputs have an exact sample count, finite samples, zeroed edges, and a peak
+  of `0.9`, saved as PCM16 WAV;
+- downloaded resources are pinned to one Hugging Face revision, and model
+  loading leaves the caller's RNG state as it found it.
+
+These outputs are sonifications: audible representations designed for
+listening, exploration, and communication. A few properties follow from that
+purpose:
+
+- `profile` and `amplitude` summarize a dynamic spectrum along its frequency
+  axis;
+- Griffin–Lim estimates phase, which can give the result a metallic character;
+- HiFi-GAN carries speech-model priors that shape the timbre;
+- Griffin–Lim keeps leading and trailing low-energy frames, so an event stays
+  at its true position on the observation time axis;
+- peak normalization preserves structure within a file, and absolute amplitude
+  comparisons belong to the original arrays;
+- `preserve_pitch=True` uses a phase vocoder, which suits sustained material
+  more than very short transients.
+
+For scientific work, keep the original array, axis calibration, slice duration,
+MSP version, and effective parameters alongside the WAV.
+
+## Project layout
+
+```text
+MSP/
+├── src/radiosonify/
+│   ├── inputs.py          # Immutable scientific input snapshots
+│   ├── registry.py        # Method compatibility and defaults
+│   ├── core.py            # Numeric validation, rebinning, and WAV I/O
+│   ├── timing.py          # Duration, speed, and output conditioning
+│   ├── api.py             # Unified orchestration and provenance
+│   ├── profile.py         # Profile interpolation and instrument response
+│   ├── amplitude.py       # Sine-carrier amplitude mapping
+│   ├── griffinlim.py      # Iterative 2-D magnitude reconstruction
+│   ├── hifigan.py         # Cached HiFi-GAN inference wrapper
+│   ├── musicnet.py        # Seeded MusicNet postprocessor
+│   └── models/            # Vendored checkpoint-compatible layers + licenses
+├── tests/
+├── examples/sonify_example.py
+├── assets/
+├── pyproject.toml
+└── README_CN.md
+```
+
+`MSP/` installs and runs on its own. Copy the directory anywhere, install it,
+and supply your own arrays and output paths.
+
+## Development
 
 ```bash
-export RADIOSONIFY_CACHE_DIR=/path/to/cache
+python -m pip install -e ".[dev]"
+python -m pytest -q
+python -m ruff check .
+python -m ruff format --check .
 ```
 
-Windows PowerShell:
+CI runs the same gates on Python 3.9 through 3.13, plus contract tests for the
+neural backends with the optional dependencies installed. Before relying on the
+neural methods in a new PyTorch or CUDA environment, run one real-checkpoint
+smoke test locally.
 
-```powershell
-$env:RADIOSONIFY_CACHE_DIR = "D:\\radiosonify-cache"
-```
+See [CONTRIBUTING.md](https://github.com/SukiYume/MSP/blob/main/CONTRIBUTING.md)
+for the full workflow.
 
-### Trust & safety note for model files
+## Citation and license
 
-This project downloads model checkpoints from the official repository on Hugging Face Hub. Loading uses a safer weights-only path where available (`torch.load(..., weights_only=True)`), with backward-compatible fallback for older PyTorch versions.
+For scientific or public-facing work, record the MSP version, data duration,
+speed, resolved method, parameters, input dimensions, and model revision.
 
-For the original standalone scripts and data files, see the [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy/original-scripts) branch.
+MSP-authored code is released under the
+[MIT License](https://github.com/SukiYume/MSP/blob/main/LICENSE). The bundled
+MusicNet inference subset and its checkpoints are CC BY-NC 4.0 and may be used
+only for non-commercial purposes. Consequently, the distribution metadata uses
+the composite expression `MIT AND CC-BY-NC-4.0`. See
+[THIRD_PARTY_NOTICES.md](https://github.com/SukiYume/MSP/blob/main/THIRD_PARTY_NOTICES.md)
+and [MODEL_ASSETS.md](https://github.com/SukiYume/MSP/blob/main/MODEL_ASSETS.md)
+before redistributing or using neural assets.
 
-## License
+---
 
-MIT License. See [LICENSE](./LICENSE).
-
-Third-party model code:
-- HiFi-GAN: [jik876/hifi-gan](https://github.com/jik876/hifi-gan) (MIT)
-- MusicNet: [facebookresearch/music-translation](https://github.com/facebookresearch/music-translation)
+<p align="center"><sub>MSP · Making radio pulse structure audible</sub></p>

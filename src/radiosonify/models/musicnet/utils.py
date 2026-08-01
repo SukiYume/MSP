@@ -5,24 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 #
 
-import time
-
 import numpy
-
-
-class timeit:
-    def __init__(self, name, logger=None):
-        self.name = name
-        self.logger = logger
-
-    def __enter__(self):
-        self.start = time.time()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.logger is None:
-            print(f'{self.name} took {(time.time() - self.start) * 1000} ms')
-        else:
-            self.logger.debug('%s took %s ms', self.name, (time.time() - self.start) * 1000)
 
 
 def mu_law(x, mu=255):

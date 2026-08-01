@@ -33,6 +33,8 @@ class QueuedConv1d(nn.Module):
             self.init_len = conv.init_len
             self.inner_conv.weight.data.copy_(conv.inner_conv.weight.data)
             self.inner_conv.bias.data.copy_(conv.inner_conv.bias.data)
+        else:
+            raise TypeError("conv must be an nn.Conv1d or QueuedConv1d")
 
         self.init_queue(data)
 
@@ -51,13 +53,13 @@ class QueuedConv1d(nn.Module):
 class WavenetGenerator(nn.Module):
     Q_ZERO = 128
 
-    def __init__(self, wavenet: WaveNet, batch_size=1, cond_repeat=800, wav_freq=16000):
+    def __init__(self, wavenet: WaveNet, cond_repeat=800, wav_freq=16000):
         super().__init__()
         self.wavenet = wavenet
         self.wavenet.shift_input = False
         self.cond_repeat = cond_repeat
         self.wav_freq = wav_freq
-        self.batch_size = batch_size
+        self.batch_size = 1
         self.was_cuda = next(self.wavenet.parameters()).is_cuda
 
         x = torch.zeros(self.batch_size, 1, 1)
@@ -76,9 +78,6 @@ class WavenetGenerator(nn.Module):
     def forward(self, x, c=None):
         return self.wavenet(x, c)
 
-    def reset(self):
-        return self.init()
-
     def init(self, batch_size=None):
         if batch_size is not None:
             self.batch_size = batch_size
@@ -95,21 +94,21 @@ class WavenetGenerator(nn.Module):
         if self.was_cuda:
             self.wavenet.cuda()
 
-    @staticmethod
-    def softmax_and_sample(prediction, method='sample'):
-        if method == 'sample':
-            probabilities = F.softmax(prediction, dim=1)
-            samples = torch.multinomial(probabilities, 1)
-        elif method == 'max':
-            _, samples = torch.max(F.softmax(prediction, dim=1), dim=1)
-        else:
-            raise AssertionError("Method not supported.")
-
-        return samples
-
+        # 分段生成时除了卷积队列，还必须保留上一段的最后一个量化样本。
+        device = next(self.wavenet.parameters()).device
+        self._last_sample = torch.full(
+            (self.batch_size, 1, 1),
+            self.Q_ZERO,
+            dtype=torch.long,
+            device=device,
+        )
     def generate(self, encodings, init=True, method='sample', pbar=None):
         if init:
             self.init(encodings.size(0))
+        elif not hasattr(self, "_last_sample"):
+            raise RuntimeError("continued generation requires an initialized decoder")
+        elif self._last_sample.size(0) != encodings.size(0):
+            raise ValueError("continued generation requires the same batch size")
 
         n_enc = encodings.size(2)
         cond_repeat = self.cond_repeat
@@ -120,6 +119,8 @@ class WavenetGenerator(nn.Module):
             self.Q_ZERO, dtype=torch.long,
             device=encodings.device,
         )
+        if not init:
+            samples[:, :, 0:1] = self._last_sample.to(encodings.device)
 
         # Pre-bind references to avoid Python attribute lookup in tight loop
         _forward = self.forward
@@ -152,4 +153,5 @@ class WavenetGenerator(nn.Module):
                 f'{n_enc * cond_repeat / self.wav_freq} seconds length '
                 f'generated in {time.time() - t0} seconds.')
 
+        self._last_sample = samples[:, :, -1:].detach()
         return samples[:, :, 1:]

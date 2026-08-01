@@ -67,7 +67,7 @@ class WavenetLayer(nn.Module):
 
 
 class WaveNet(nn.Module):
-    def __init__(self, args, create_layers=True, shift_input=True):
+    def __init__(self, args, shift_input=True):
         super().__init__()
 
         self.blocks = args.blocks
@@ -79,14 +79,13 @@ class WaveNet(nn.Module):
         self.classes = 256
         self.shift_input = shift_input
 
-        if create_layers:
-            layers = []
-            for _ in range(self.blocks):
-                for i in range(self.layer_num):
-                    dilation = 2 ** i
-                    layers.append(WavenetLayer(self.residual_channels, self.skip_channels, self.cond_channels,
-                                               self.kernel_size, dilation))
-            self.layers = nn.ModuleList(layers)
+        layers = []
+        for _ in range(self.blocks):
+            for i in range(self.layer_num):
+                dilation = 2 ** i
+                layers.append(WavenetLayer(self.residual_channels, self.skip_channels, self.cond_channels,
+                                           self.kernel_size, dilation))
+        self.layers = nn.ModuleList(layers)
 
         self.first_conv = CausalConv1d(1, self.residual_channels, kernel_size=self.kernel_size)
         self.skip_conv = nn.Conv1d(self.residual_channels, self.skip_channels, kernel_size=1)
@@ -146,43 +145,3 @@ class WaveNet(nn.Module):
         skip = self.logits(skip)
 
         return skip
-
-    ### Weights ###
-    def export_layer_weights(self):
-        Wdilated, Bdilated = [], []
-        Wres, Bres = [], []
-        Wskip, Bskip = [], []
-
-        for layer in self.layers:
-            Wdilated.append(layer.causal.weight)
-            Bdilated.append(layer.causal.bias)
-
-            Wres.append(layer.residual.weight)
-            Bres.append(layer.residual.bias)
-
-            Wskip.append(layer.skip.weight)
-            Bskip.append(layer.skip.bias)
-
-        return Wdilated, Bdilated, Wres, Bres, Wskip, Bskip
-
-    def export_embed_weights(self):
-        inp = torch.range(0, 255) / 255 - 0.5
-        prev = self.first_conv.weight[:, :, 0].cpu().contiguous()
-        prev = inp.unsqueeze(1) @ prev.transpose(0, 1)
-        prev = prev + self.first_conv.bias.cpu() / 2
-
-        curr = self.first_conv.weight[:, :, 1].cpu().contiguous()
-        curr = inp.unsqueeze(1) @ curr.transpose(0, 1)
-        curr = curr + self.first_conv.bias.cpu() / 2
-
-        return prev, curr
-
-    def export_final_weights(self):
-        Wzi = self.skip_conv.weight
-        Bzi = self.skip_conv.bias
-        Wzs = self.fc.weight
-        Bzs = self.fc.bias
-        Wza = self.logits.weight
-        Bza = self.logits.bias
-
-        return Wzi, Bzi, Wzs, Bzs, Wza, Bza

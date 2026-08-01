@@ -1,230 +1,358 @@
-<div align="center">
-
-<div align="center"><img style="border-radius:50%;border: royalblue dashed 1px;padding: 5px" src="assets/Burst.png" alt="RMS" width="140px" /></div>
-
-# RadioSonify
-
-_多种方法声化射电脉冲_
-
-</div>
+<h1 align="center">MSP · RadioSonify</h1>
 
 <p align="center">
-  <a href="https://pypi.org/project/radiosonify/">
-    <img src="https://img.shields.io/pypi/v/radiosonify?color=royalblue" alt="PyPI">
-  </a>
-  <a href="https://github.com/SukiYume/MSP">
-    <img src="https://img.shields.io/badge/MethodSonifyPulse-MSP-royalblue" alt="MSP">
-  </a>
-  <a href="./LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-  </a>
+  <img src="https://raw.githubusercontent.com/SukiYume/MSP/main/assets/Burst.png" alt="射电脉冲可视化" width="180">
 </p>
 
 <p align="center">
-  <a href="./README.md" target="_blank">English README</a>
+  <strong>把射电脉冲数据变成可以听的声音</strong><br>
+  输入一条轮廓或一张动态谱，输出一个你指定时长的 WAV。
 </p>
 
-## 简介
+<p align="center">
+  <img alt="Python 3.9+" src="https://img.shields.io/badge/Python-3.9%2B-3776ab?logo=python&logoColor=white">
+  <a href="https://huggingface.co/TorchLight/radiosonify"><img alt="模型与数据" src="https://img.shields.io/badge/Models%20%26%20Data-Hugging%20Face-ffd21e"></a>
+  <a href="https://github.com/SukiYume/MSP/blob/main/THIRD_PARTY_NOTICES.md"><img alt="混合许可证" src="https://img.shields.io/badge/License-MIT%20%2B%20CC--BY--NC--4.0-orange"></a>
+</p>
 
-射电望远镜可以将电磁信号数字化采样并记录下来，但接收频率通常不在人耳可听范围内。原始数据通常经过傅立叶变换转换到时间-频率域，并丢弃相位信息以节省存储空间，因此无法恢复原始波形。
+<p align="center">
+  <a href="#安装">安装</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#你的数据">数据</a> ·
+  <a href="#方法">方法</a> ·
+  <a href="#时长速度与重复">时长</a> ·
+  <a href="#返回结果">结果</a> ·
+  <a href="https://github.com/SukiYume/MSP/blob/main/README.md">English</a>
+</p>
 
-**RadioSonify** 提供 6 种方法将这类无相位的时频数据转换为可听声音，从简单的轮廓映射到神经声码器重建。
+---
 
-## 更新内容（v0.1.2）
+## MSP 做什么
 
-- 修复 `rebin_spectrogram()` 在目标 bin 超过输入尺寸时的崩溃问题。
-- 修正 `amplitude_modulate(freq=...)` 的频率语义，使 `freq` 直接对应物理 Hz。
-- 在 `musicnet()` 中增加 CUDA 可用性显式检查。
-- 模型加载在支持时使用更安全的 `torch.load(..., weights_only=True)`。
-- 新增缓存目录环境变量 `RADIOSONIFY_CACHE_DIR`。
+射电望远镜记录的是科学数组。MSP 把其中两种数组映射成声音：
+
+- 一维**脉冲轮廓**，以及
+- 二维**动态谱**（时间 × 频率）。
+
+你提供数组和它覆盖的物理时长，MSP 选择合适的方法，按你要求的时长合成音频，并把
+用到的全部参数随波形一起返回。
+
+```mermaid
+flowchart LR
+    A["轮廓 · 一维"] --> C["SonificationInput"]
+    B["动态谱 · 时间 × 频率"] --> C
+    C --> D["选择方法与参数"]
+    D --> E["拟合 时长 × repeat ÷ speed"]
+    E --> F["WAV + 可复现元数据"]
+    F -. 可选 .-> G["MusicNet 风格化"]
+```
 
 ## 安装
 
-```bash
-# 核心包（方法 1–3）
-pip install radiosonify
-
-# 附带 HiFi-GAN 神经声码器（方法 4）
-pip install radiosonify[hifigan]
-
-# 附带 MusicNet 风格迁移（方法 5）
-pip install radiosonify[musicnet]
-
-# 安装全部
-pip install radiosonify[all]
-```
-
-### 开发环境（可复现测试最短路径）
+从 PyPI 安装发布版本：
 
 ```bash
-python -m pip install --upgrade pip
-pip install -e .[dev]
-pytest -q
+python -m pip install radiosonify
 ```
 
-说明：
-- 在部分平台上，`soundfile` 可能需要系统层 `libsndfile` 依赖。
-- 可选方法依赖默认拆分安装：`hifigan`、`musicnet`。
+`profile`、`amplitude` 和 `griffinlim` 三个方法在基础安装下即可运行。需要神经后端时再装：
+
+```bash
+python -m pip install "radiosonify[hifigan]"
+python -m pip install "radiosonify[musicnet]"
+python -m pip install "radiosonify[all]"
+```
+
+请安装与你的 CPU 或 CUDA 环境匹配的 PyTorch 版本。
+
+要做可编辑的源码安装，先克隆仓库，再运行 `python -m pip install -e .`；需要全部开发
+依赖时使用 `python -m pip install -e ".[all,dev]"`。
+
+示例数组和预训练权重会在首次使用时从
+[`TorchLight/radiosonify`](https://huggingface.co/TorchLight/radiosonify) 下载，
+固定在同一个 revision 上，缓存于 `~/.cache/radiosonify`。导入前设置
+`RADIOSONIFY_CACHE_DIR` 可换到其他位置。
+乐器响应在本机由确定性解析波形生成，不再下载任何声音录音。资产来源和许可证见
+[MODEL_ASSETS.md](https://github.com/SukiYume/MSP/blob/main/MODEL_ASSETS.md)。
 
 ## 快速开始
 
-### Python API
+在源码检出目录中运行内置示例，完整走一遍流程：
+
+```bash
+python examples/sonify_example.py
+```
+
+### 命令行兼容
+
+0.1.x 的 `radiosonify` 命令继续保留：
+
+```bash
+radiosonify list-methods
+radiosonify amplitude --input profile.npy --output profile.wav --repeat 5
+radiosonify griffinlim --input spectrum.npy --output spectrum.wav
+radiosonify download-examples --dest ./data
+```
+
+使用 `radiosonify COMMAND --help` 查看完整参数。需要时长感知和完整结果元数据时，推荐
+使用 Python 的 `sonify()` API。
+
+### 一条脉冲轮廓
 
 ```python
-import radiosonify as asf
+import numpy as np
+import radiosonify as rs
 
-# 从 Hugging Face Hub 加载示例数据
-data = asf.load_example("burst")        # 二维时频谱 (时间 x 频率)
-profile = asf.load_example("profile")   # 一维脉冲轮廓
+profile = np.load("profile.npy", allow_pickle=False)
 
-# 方法 1：脉冲轮廓转波形（小提琴音色卷积）
-audio, sr = asf.profile_to_wave(data, sr=48000, duration=10, instrument="violin")
+result = rs.sonify(
+    profile,
+    data_duration=0.725,       # 数据覆盖的物理时长，单位秒
+    method="auto",
+    repeat=5,                  # 把数据连续播放 5 次
+    method_params={"freq": 880},
+    output="profile.wav",
+)
 
-# 方法 2：振幅调制正弦波
-audio, sr = asf.amplitude_modulate(profile, sr=48000, duration=2, freq=1000)
-
-# 方法 3：Griffin-Lim 声码器
-audio, sr = asf.griffinlim(data, sr=48000, n_iter=200)
-
-# 方法 4：HiFi-GAN 神经声码器（需要 torch）
-audio, sr = asf.hifigan(data)
-
-# 方法 5：WaveNet 音乐风格迁移（需要 torch，推荐 CUDA）
-audio, sr = asf.musicnet("input.wav", decoder_id=2)
-
-# 保存输出
-asf.save_audio(audio, sr, "output.wav")
+print(result.method, result.output_duration, result.sample_rate)
 ```
 
-### 命令行
+### 一张动态谱
 
-```bash
-# 列出可用方法
-radiosonify list-methods
+```python
+from pathlib import Path
 
-# 使用 Griffin-Lim 声化
-radiosonify griffinlim --input burst.npy --output burst.wav --sr 48000
+import numpy as np
+import radiosonify as rs
 
-# 使用轮廓方法声化
-radiosonify profile --input burst.npy --output profile.wav --instrument violin
+dynamic_spectrum = np.load("observation.npy", allow_pickle=False)
 
-# 使用振幅调制声化
-radiosonify amplitude --input profile.npy --output amp.wav --freq 1000
+source = rs.SonificationInput(
+    dynamic_spectrum,
+    duration=4.2,
+    data_type="dynamic_spectrum",   # 省略时按维数推断
+    name="candidate-01",
+)
 
-# 下载示例数据
-radiosonify download-examples --dest ./data/
+result = rs.sonify(
+    source,
+    method="griffinlim",
+    speed=2.0,                      # 2 倍速得到 2.1 秒音频
+    method_params={"n_iter": 32, "time_rebin": 256, "freq_rebin": 256},
+    output=Path("audio") / "candidate-01.wav",
+)
 ```
 
-现在 CLI 中所有命令的 `--input` 都会进行路径存在性校验，错误提示更友好。
+## 你的数据
 
-## 方法列表
+| 类型 | 形状 | 坐标轴含义 |
+|---|---:|---|
+| `profile` | `(time,)` | 每个相位或时间 bin 一个强度值 |
+| `dynamic_spectrum` | `(time, frequency)` | 行沿时间推进，列沿频率推进 |
 
-| # | 方法 | 函数 | 额外依赖 |
-|---|------|------|---------|
+MSP 接受实数、有限、非空的数组。一维输入读作轮廓，二维输入读作动态谱，因此当形状
+本身已经说明数据类型时，`data_type` 可以省略。
 
-| 1 | 脉冲轮廓转波形 | `profile_to_wave()` | 无 |
-| 2 | 振幅调制 | `amplitude_modulate()` | 无 |
-| 3 | Griffin-Lim 声码器 | `griffinlim()` | 无 |
-| 4 | HiFi-GAN 神经声码器 | `hifigan()` | torch, scikit-image |
-| 5 | WaveNet 风格迁移 | `musicnet()` | torch, tqdm（CUDA 可选但更快） |
+数组形状本身不携带时间定标，所以 `data_duration` 是必填的。声化一段更长观测中的
+切片时，请传入该切片的时长。
 
-### 输入处理
+`SonificationInput` 会复制数组并把副本设为只读，让转换过程中的数据保持稳定。
 
-- **轮廓类方法（1, 2）**：接受一维轮廓或二维时频谱（自动沿频率轴平均）
-- **时频谱方法（3, 4）**：接受二维时频谱（自动重采样到目标维度）
-- **MusicNet（5）**：接受 WAV 文件路径或一维音频数组
+## 方法
 
-所有方法返回 `(audio_array, sample_rate)` 元组。
+`method="auto"` 会按输入类型选择依赖最轻的默认方法：
 
-### 输入长度与下采样参考
+| 输入 | 默认方法 | 可用方法 |
+|---|---|---|
+| 轮廓 | `amplitude` | `profile`、`amplitude` |
+| 动态谱 | `griffinlim` | `profile`、`amplitude`、`griffinlim`、`hifigan` |
 
-设二维输入形状为 `(T, F)`，一维输入长度为 `N`。
-
-| # | 方法 | 输出采样率 | 输入点数与输出时长关系 | 建议下采样目标 |
-|---|------|-----------|------------------------|---------------|
-| 1 | `profile_to_wave` | 用户指定 `sr`（默认 48000） | 输出时长严格等于 `duration`（默认 10 秒），插值后与输入点数无直接关系 | 为保证包络细节，建议有效长度 `L` 取 200-5000 |
-| 2 | `amplitude_modulate` | 用户指定 `sr`（默认 48000） | 输出时长严格等于 `duration`（默认 2 秒），插值后与输入点数无直接关系 | 与方法 1 类似，建议 `L` 取 200-5000 |
-| 3 | `griffinlim` | 用户指定 `sr`（默认 48000） | 设 `time_rebin=B_t`，时长约为 `B_t * (frame_length/4)`；默认 `frame_length=0.04`，即约 `B_t * 0.01` 秒 | 建议 `time_rebin ≈ 100 * 目标秒数`；`freq_rebin` 取 256-512 |
-| 4 | `hifigan` | 来自模型配置 `sampling_rate`（当前模型 22050） | 设 `time_rebin=B_t`，时长约为 `B_t * hop_size / sampling_rate`；当前模型 `hop_size=256`，即约 `B_t * 0.01161` 秒 | 建议 `time_rebin ≈ 目标秒数 * 22050 / 256`（约 `86 * 目标秒数`） |
-| 5 | `musicnet` | 用户指定 `sr`（默认 48000） | 基本保持输入 WAV 时长，但受模型步长量化：输出采样点约 `floor(N/800) * 800`（当前 `encoder_pool=800`） | 一般无需额外下采样；超长音频建议先切片再转换 |
-
-#### 与 legacy 脚本一致的固定参数（参考）
-
-如果你希望和 legacy 脚本保持一致，测试中推荐固定使用：
-
-- 方法 3（`griffinlim`）：`time_rebin=128`, `freq_rebin=512`
-- 方法 4（`hifigan`）：`time_rebin=128`（频率轴在模型流程中固定重采样到 80 mel bins）
-
-这些固定值已经用于测试中的可复现实例；实际生产使用仍建议按目标时长做参数化配置。
-
-#### 二维数据的另一维（频率轴）应取多大
-
-- 方法 0/1/2：二维输入会先沿频率轴做平均（`mean(axis=1)`），因此没有硬性频率点数要求；建议至少保留 `F >= 32`，常见可用范围 `64-1024`。
-- 方法 3（`griffinlim`）：频率轴会重采样到 `freq_rebin`（若不设则用 `n_mels`，默认 `512`）；建议输出频率点数取 `256-512`，legacy 对齐可用 `512`。
-- 方法 4（`hifigan`）：模型前处理会强制把频率轴缩放到 `80` 个 mel bins；输入频率轴无需固定，但建议原始 `F >= 80`（常见 `256-1024`）以减少频率细节损失。
-
-可按下面思路设置：先根据目标时长确定 `time_rebin`，再把方法 3 的 `freq_rebin` 设为 `256` 或 `512`；方法 4 只需保证原始频率分辨率不要过低。
-
-#### 常见输入形状的推荐参数速查表
-
-> 下面以“语音长度约 1-3 秒、保留主要结构且可听”为目标给出经验值。
-
-| 输入形状 `(T, F)` | 方法 3 (`griffinlim`) 推荐参数 | 方法 4 (`hifigan`) 推荐参数 | 预估时长 |
+| 方法 | 听起来是什么 | 承载的信息 | 额外依赖 |
 |---|---|---|---|
-| `(1024, 256)` | `time_rebin=100`, `freq_rebin=256` | `time_rebin=100` | M3: ~1.0s；M4: ~1.16s |
-| `(2048, 512)` | `time_rebin=128`, `freq_rebin=512` | `time_rebin=128` | M3: ~1.28s；M4: ~1.49s |
-| `(4096, 512)` | `time_rebin=200`, `freq_rebin=512` | `time_rebin=200` | M3: ~2.0s；M4: ~2.32s |
-| `(8192, 1024)` | `time_rebin=300`, `freq_rebin=512` | `time_rebin=300` | M3: ~3.0s；M4: ~3.48s |
+| `profile` | 轮廓形状直接成为波形，可选用小提琴或钢琴采样染色 | 脉冲的时间位置、宽度和相对形状 | — |
+| `amplitude` | 轮廓控制一个稳定正弦音的响度 | 脉冲强弱和时间包络 | — |
+| `griffinlim` | 完整二维强度图读作幅度谱，由 Griffin–Lim 估计相位 | 时频演化，包括扫描和频带结构 | — |
+| `hifigan` | 二维图送入预训练神经声码器，得到更连续的音质 | 时频演化 | `hifigan` |
 
-说明：
+`profile` 和 `amplitude` 会把动态谱沿频率求均值，再用得到的时间轮廓工作；
+`griffinlim` 和 `hifigan` 使用完整的二维结构。
 
-- 方法 3 时长近似 `time_rebin × 0.01s`（默认参数下）。
-- 方法 4 时长近似 `time_rebin × 256 / 22050 ≈ time_rebin × 0.01161s`。
-- 若你更关注频率细节，可优先把方法 3 的 `freq_rebin` 设为 `512`；若更关注速度和轻量，可设为 `256`。
+方法自己的设置放在 `method_params`。用注册表查询某个方法接受的完整参数列表：
 
-### 声码器对比
+```python
+for method in rs.available_methods("dynamic_spectrum"):
+    print(method.name, method.parameters, method.optional_extra)
 
-<div align="center"><img src="assets/MSPT.png" alt="时频谱对比" width="800px" /></div>
+for postprocessor in rs.available_postprocessors():
+    print(postprocessor.name, postprocessor.parameters, postprocessor.optional_extra)
+```
 
-左：原始时频数据。右：经声码器转换后重建的时频谱。
+### 几个值得了解的设置
 
-### MusicNet 风格迁移
+`time_rebin` 和 `freq_rebin` 指定目标 bin 数。MSP 在完整坐标轴上做等宽面积平均，
+目标尺寸取任意值时每个输入样本都会参与。轮廓方法的 `time_downsample` 起同样的作用。
 
-| 解码器 ID | 0 | 1 | 2 | 3 | 4 | 5 |
-|-----------|---|---|---|---|---|---|
-| 乐器 | 伴奏小提琴 | 独奏大提琴 | 独奏钢琴 | 独奏钢琴 | 弦乐四重奏 | 管风琴五重奏 |
-| 作曲家 | 贝多芬 | 巴赫 | 巴赫 | 贝多芬 | 贝多芬 | 卡姆比尼 |
+`compression` 决定 `amplitude` 方法把轮廓强度映射成响度的曲线，公式为
+`log1p(compression * x) / log1p(compression)`。默认 `compression=99` 把峰值 1%
+的结构提升到包络峰值约 15%；设为 `0` 得到线性包络。
 
-## 数据与模型
+`clean=True` 在合成前做基于百分位的清理，当带通形状或窄带干扰主导强度量程时很有用。
 
-示例数据和预训练模型托管在 [Hugging Face Hub](https://huggingface.co/TorchLight/radiosonify)，首次使用时自动下载。
+HiFi-GAN 的 `time_smoothing=<sigma>` 以输入时间 bin 为单位沿时间轴平滑，同时保留
+各频率通道上持续存在的结构。
 
-### 缓存目录
+Griffin–Lim 默认迭代 64 次估计相位。mel 到线性的近似变换本身存在误差下限，因此在
+调高 `n_iter` 前建议先对自己的数据实测收益。
 
-默认缓存目录是 `~/.cache/radiosonify`。
+## 时长、速度与重复
 
-你可以通过环境变量覆盖：
+所有方法遵循同一条规则：
+
+```text
+目标音频时长 = 数据物理时长 × repeat ÷ speed
+目标样本数   = round(采样率 × 目标音频时长)
+```
+
+`speed=1` 配合 `repeat=1` 保持真实物理时长。`speed=2` 以两倍速播放，`speed=0.5`
+以半速播放，`speed=0.1` 可以把毫秒量级的爆发拉长到适合聆听的长度。`repeat=5` 把
+数据连续播放五次；由于 MSP 按分箱数据处理轮廓，相邻两次之间衔接平滑。`repeat`
+适用于 `profile` 和 `amplitude` 方法。
+
+轮廓映射和振幅调制直接按目标长度合成。Griffin–Lim 和 HiFi-GAN 先产生方法原生波形，
+再由时长层重采样到目标长度。这种重采样等效于改变播放速率，音高随时长一同变化；设置
+`preserve_pitch=True` 可改用相位声码器做时间拉伸。
+
+对二维方法，`time_rebin` 决定方法原生长度，因而影响最终音高。`SonificationResult`
+记录了 `method_native_samples`、`method_native_duration` 和 `method_time_scale`
+（拟合后样本数 / 原生样本数），让这层关系保持可见。
+
+各方法有各自的原生采样率：可配置方法为 48 kHz，HiFi-GAN 为 22.05 kHz，经 MusicNet
+后为 16 kHz。需要一批文件共用同一容器采样率时，传入 `output_sr=48_000`。该转换保持
+时长与音高，可听带宽维持在方法的原生上限。
+
+统一流程的每个输出最后都会去直流、施加最长 5 毫秒的边缘淡化、把峰值归一化到 `0.9`，
+并保持精确的目标样本数。
+
+## 可选的 MusicNet 风格化
+
+MusicNet 以音频为输入，因此作为后处理器接在主方法之后：
+
+```python
+result = rs.sonify(
+    source,
+    method="amplitude",
+    postprocess="musicnet",
+    postprocess_params={"decoder_id": 2, "seed": 0},
+    output_sr=48_000,
+    output="styled.wav",
+)
+```
+
+共有六种风格解码器，见 `radiosonify.musicnet.STYLE_NAMES`。生成过程是随机的，默认
+`seed=0` 让重复运行结果一致，同时保持调用者的全局 PyTorch 随机状态不变；传入
+`seed=None` 可每次重新采样。MusicNet 在其原生 16 kHz、正常播放速度下运行，`speed`
+由 MSP 在之后施加。较长的输入分段解码，段与段之间保持连续。
+
+当你想要一个刻意风格化的呈现时使用 MusicNet，并在输出上标明这一点。
+
+## 返回结果
+
+`sonify()` 返回 `SonificationResult`，其中包含音频以及描述本次转换所需的有效运行设置：
+
+- 解析出的数据类型和方法；
+- 物理时长、目标时长和实际输出时长；
+- 重复次数、播放速度和音高模式；
+- 只读的方法参数与后处理参数；
+- 各阶段的原生样本数与时间缩放比；
+- 采样率、来源名称和输出路径。
+
+五个底层函数同样可用，返回 `(audio_array, sample_rate)`：
+
+```python
+rs.profile_to_wave(...)
+rs.amplitude_modulate(...)
+rs.griffinlim(...)
+rs.hifigan(...)
+rs.musicnet(...)
+```
+
+需要方法原生时长时使用它们；需要 MSP 统一处理物理时长、方法兼容性和公共元数据时，
+使用 `sonify()`。
+
+## 科学说明
+
+MSP 提供以下保证：
+
+- 公开数值输入均为实数、有限、非空，并经过维度校验；
+- 控制参数和输出路径在任何耗时推理开始前完成校验；
+- 重分箱覆盖完整的源坐标轴，并保持其面积均值；
+- 输出具有精确样本数、有限样本值、归零的两端和 `0.9` 的峰值，保存为 PCM16 WAV；
+- 下载资源固定在同一个 Hugging Face revision 上，模型加载后调用者的随机数状态保持原样。
+
+这些输出是声化结果：为聆听、探索和交流而设计的听觉表示。由这一目的可以推出几条性质：
+
+- `profile` 和 `amplitude` 会把动态谱沿频率轴归纳；
+- Griffin–Lim 估计相位，结果可能带有金属感；
+- HiFi-GAN 携带语音模型先验，会影响音色；
+- Griffin–Lim 保留首尾的低能量帧，使事件停留在观测时间轴上的真实位置；
+- 峰值归一化保持文件内部的结构关系，绝对幅度的比较请回到原始数组；
+- `preserve_pitch=True` 使用相位声码器，更适合持续性素材而非极短瞬变。
+
+用于科学工作时，请把原始数组、坐标轴定标、切片时长、MSP 版本和生效参数与 WAV 一并保存。
+
+## 项目结构
+
+```text
+MSP/
+├── src/radiosonify/
+│   ├── inputs.py          # 不可变的科学输入快照
+│   ├── registry.py        # 方法兼容性与默认值
+│   ├── core.py            # 数值校验、重分箱与 WAV 读写
+│   ├── timing.py          # 时长、速度与输出整形
+│   ├── api.py             # 统一编排与溯源信息
+│   ├── profile.py         # 轮廓插值与乐器响应
+│   ├── amplitude.py       # 正弦载波振幅映射
+│   ├── griffinlim.py      # 迭代式二维幅度重建
+│   ├── hifigan.py         # 带缓存的 HiFi-GAN 推理封装
+│   ├── musicnet.py        # 带种子的 MusicNet 后处理
+│   └── models/            # 与 checkpoint 兼容的内置模型层 + 许可证
+├── tests/
+├── examples/sonify_example.py
+├── assets/
+├── pyproject.toml
+└── README_CN.md
+```
+
+`MSP/` 可以独立安装和运行。把整个目录复制到任何地方，安装后提供自己的数组和输出路径即可。
+
+## 开发
 
 ```bash
-export RADIOSONIFY_CACHE_DIR=/path/to/cache
+python -m pip install -e ".[dev]"
+python -m pytest -q
+python -m ruff check .
+python -m ruff format --check .
 ```
 
-Windows PowerShell：
+CI 在 Python 3.9 到 3.13 上运行同样的门禁，并在安装可选依赖的任务中执行神经后端的
+契约测试。在新的 PyTorch 或 CUDA 环境中依赖神经方法之前，建议先在本地跑一次真实
+checkpoint 的冒烟测试。
 
-```powershell
-$env:RADIOSONIFY_CACHE_DIR = "D:\\radiosonify-cache"
-```
+完整流程见
+[CONTRIBUTING.md](https://github.com/SukiYume/MSP/blob/main/CONTRIBUTING.md)。
 
-### 模型加载安全说明
+## 引用与许可
 
-本项目从 Hugging Face Hub 官方仓库下载模型权重。加载时在可用版本上优先使用更安全的 weights-only 路径（`torch.load(..., weights_only=True)`），并对旧版 PyTorch 保持兼容回退。
+用于科学或面向公众的工作时，请记录 MSP 版本、数据时长、播放速度、解析出的方法、
+参数、输入维度和模型 revision。
 
-原始独立脚本和数据文件请查看 [`legacy/original-scripts`](https://github.com/SukiYume/MSP/tree/legacy/original-scripts) 分支。
+MSP 自有代码采用
+[MIT License](https://github.com/SukiYume/MSP/blob/main/LICENSE)。内置的 MusicNet 推理子集及其 checkpoint
+采用 CC BY-NC 4.0，只允许非商业用途。因此发行包元数据使用组合表达式
+`MIT AND CC-BY-NC-4.0`。重新分发或使用神经资产前，请阅读
+[THIRD_PARTY_NOTICES.md](https://github.com/SukiYume/MSP/blob/main/THIRD_PARTY_NOTICES.md)
+和 [MODEL_ASSETS.md](https://github.com/SukiYume/MSP/blob/main/MODEL_ASSETS.md)。
 
-## 许可
+---
 
-MIT License。见 [LICENSE](./LICENSE)。
-
-第三方模型代码：
-- HiFi-GAN：[jik876/hifi-gan](https://github.com/jik876/hifi-gan)（MIT）
-- MusicNet：[facebookresearch/music-translation](https://github.com/facebookresearch/music-translation)
+<p align="center"><sub>MSP · 让射电脉冲结构可听</sub></p>

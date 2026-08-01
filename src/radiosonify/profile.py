@@ -1,21 +1,46 @@
-"""Method 1: Convert pulse profile to waveform via interpolation."""
+"""方法 1：把时间轮廓直接插值为波形，可选乐器脉冲响应卷积。"""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import soundfile as sf
-from scipy import interpolate, signal, stats
+from scipy import signal
 
-from .core import normalize, save_audio, to_profile
+from .core import (
+    _interpolate_repeated_profile,
+    _peak_normalize,
+    _positive_float,
+    _positive_int,
+    _wav_output_path,
+    normalize,
+    save_audio,
+    to_profile,
+)
 from .hub import get_instrument_path
+from .timing import duration_to_samples
 
 _WAVE_PEAK = 0.95
 
 
-def _read_wave(file: str) -> np.ndarray:
-    """Read a WAV file and return mono float waveform."""
-    wave_data, _ = sf.read(file, always_2d=True)
-    return wave_data[:, 0].astype(np.float64)
+def _read_wave(file: str) -> tuple[np.ndarray, int]:
+    """读取乐器 WAV，混合为单声道并返回原采样率。"""
+    wave_data, source_sr = sf.read(file, always_2d=True)
+    if wave_data.size == 0:
+        raise ValueError(f"instrument WAV is empty: {file}")
+    if not np.all(np.isfinite(wave_data)):
+        raise ValueError(f"instrument WAV contains non-finite samples: {file}")
+    mono = np.mean(wave_data.astype(np.float64), axis=1)
+    return mono, _positive_int(source_sr, name="instrument sample rate")
+
+
+def _resample_wave(sound: np.ndarray, source_sr: int, target_sr: int) -> np.ndarray:
+    """在保持乐器样本时长的同时转换采样率。"""
+    if source_sr == target_sr:
+        return sound
+    common = int(np.gcd(source_sr, target_sr))
+    return signal.resample_poly(sound, target_sr // common, source_sr // common)
 
 
 def profile_to_wave(
@@ -25,13 +50,13 @@ def profile_to_wave(
     repeat: int = 10,
     time_downsample: int | None = None,
     instrument: str | None = "violin",
-    output: str | None = None,
+    output: str | Path | None = None,
 ) -> tuple[np.ndarray, int]:
-    """Convert pulse profile to audible waveform.
+    """把脉冲轮廓转换为可听波形。
 
     If data is 2D (time x freq), it is averaged along the frequency axis.
     The profile is repeated, interpolated to the target duration, and
-    optionally convolved with an instrument sample.
+    optionally convolved with a deterministic synthesized instrument response.
 
     Args:
         data: 1D profile or 2D spectrogram (time x freq).
@@ -45,50 +70,44 @@ def profile_to_wave(
     Returns:
         Tuple of (audio_array, sample_rate).
     """
+    output_path = None if output is None else _wav_output_path(output)
+    sr = _positive_int(sr, name="sr")
+    repeat = _positive_int(repeat, name="repeat")
+    duration = _positive_float(duration, name="duration")
+    if instrument not in (None, "violin", "piano"):
+        raise ValueError("instrument must be 'violin', 'piano', or None")
+
+    n_samples = duration_to_samples(duration, sr)
+
     profile = to_profile(data, downsample=time_downsample)
-    profile = np.tile(profile, repeat)
+    if len(profile) < 2 or float(np.ptp(profile)) == 0:
+        audio = np.zeros(n_samples, dtype=np.float32)
+    else:
+        # 先映射到双极性范围，确保轮廓的相对形状成为声压波形而不是纯 DC。
+        wave_raw = _interpolate_repeated_profile(
+            profile,
+            repeat=repeat,
+            n_samples=n_samples,
+        )
+        wave_raw = normalize(wave_raw) * 2.0 - 1.0
 
-    # Guard against degenerate single-sample profile (division by zero)
-    if len(profile) < 2:
-        # With only one sample, output silence of requested duration
-        audio = np.zeros(int(sr * duration), dtype=np.float32)
-        if output is not None:
-            save_audio(audio, sr, output)
-        return audio, sr
+        if instrument is not None:
+            instrument_path = get_instrument_path(instrument)
+            sound, source_sr = _read_wave(instrument_path)
+            sound = _resample_wave(sound, source_sr, sr)
+            sound = sound - np.mean(sound)
+            scale = float(np.sum(np.abs(sound)))
+            if scale <= 1e-12:
+                raise ValueError(f"instrument WAV has no usable AC signal: {instrument_path}")
+            # L1 归一化脉冲响应，防止卷积长度改变整体增益。这里必须使用因果截取；
+            # ``mode="same"`` 会从完整卷积的中心取样，几毫秒的轮廓可能只截到
+            # 乐器样本中近似常量的一小段，最终去直流后就会变成静音。
+            convolved = signal.fftconvolve(wave_raw, sound / scale, mode="full")
+            wave_raw = convolved[: len(wave_raw)]
 
-    n_samples = int(sr * duration)
-    time_axis = np.arange(len(profile)) / (len(profile) - 1) * duration
-    f_interp = interpolate.interp1d(time_axis, profile, kind="linear")
-    wave_time = np.linspace(0, duration, n_samples, endpoint=False)
-    wave_time = np.clip(wave_time, time_axis[0], time_axis[-1])
-    wave_raw = f_interp(wave_time)
+        audio = _peak_normalize(wave_raw, peak=_WAVE_PEAK)
 
-    wave_raw = normalize(wave_raw)
-
-    if instrument is not None:
-        instrument_path = get_instrument_path(instrument)
-        sound = _read_wave(instrument_path)
-
-        n_resampled = max(1, int(len(sound) * 44100 / sr))
-        if n_resampled > 0:
-            sounds = stats.binned_statistic(
-                x=np.arange(len(sound)),
-                values=sound.astype(np.float64),
-                bins=n_resampled,
-            )[0]
-            sounds = np.nan_to_num(sounds, nan=0.0, posinf=0.0, neginf=0.0)
-            integral = np.trapezoid(sounds)
-            if abs(integral) > 1e-10:
-                sound_norm = sounds / integral
-            else:
-                sound_norm = sounds
-            wave_raw = signal.convolve(wave_raw.astype(np.float64), sound_norm, mode="same")
-            wave_raw = normalize(wave_raw)
-
-    wave_centered = wave_raw * 2.0 - 1.0
-    audio = (wave_centered * _WAVE_PEAK).astype(np.float32)
-
-    if output is not None:
-        save_audio(audio, sr, output)
+    if output_path is not None:
+        save_audio(audio, sr, output_path)
 
     return audio, sr

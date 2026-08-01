@@ -1,125 +1,221 @@
-"""RadioSonify command-line interface."""
+"""Backward-compatible RadioSonify command-line interface."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import click
 import numpy as np
 
+_INPUT_NPY = click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, path_type=Path)
+_INPUT_WAV = click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, path_type=Path)
+
 
 @click.group()
-@click.version_option()
-def main():
-    """RadioSonify - Convert radio telescope data into audible sound."""
-    pass
+@click.version_option(package_name="radiosonify")
+def main() -> None:
+    """RadioSonify - convert radio profiles and dynamic spectra to audio."""
+
+
+@main.command("list-methods")
+def list_methods() -> None:
+    """List available sonification methods and postprocessors."""
+    from .registry import available_methods, available_postprocessors
+
+    for method in available_methods():
+        click.echo(f"  {method.name:12s}  {method.description}")
+    for postprocessor in available_postprocessors():
+        click.echo(f"  {postprocessor.name:12s}  {postprocessor.description} (postprocessor)")
 
 
 @main.command()
-def list_methods():
-    """List available sonification methods."""
-    methods = [
-        ("profile", "Convert pulse profile to waveform with instrument convolution"),
-        ("amplitude", "Amplitude-modulated sine wave"),
-        ("griffinlim", "Griffin-Lim phase reconstruction vocoder"),
-        ("hifigan", "HiFi-GAN neural vocoder (requires torch)"),
-        ("musicnet", "WaveNet music style transfer (requires torch; CUDA recommended)"),
-    ]
-    for name, desc in methods:
-        click.echo(f"  {name:12s}  {desc}")
-
-
-@main.command()
-@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
-@click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--sr", default=48000, type=click.IntRange(1), help="Sample rate (Hz)")
-@click.option("--duration", default=10.0, type=click.FloatRange(min=0.001), help="Duration (seconds)")
-@click.option("--repeat", default=10, type=click.IntRange(1), help="Profile repeat count")
-@click.option("--instrument", default="violin", help="Instrument (violin/piano)")
-@click.option("--no-instrument", is_flag=True, help="Disable instrument convolution")
-@click.option("--downsample", default=None, type=click.IntRange(1), help="Time downsample factor")
-def profile(input_path, output_path, sr, duration, repeat, instrument, no_instrument, downsample):
-    """Sonify using pulse profile to waveform (Method 1)."""
+@click.option("--input", "input_path", required=True, type=_INPUT_NPY, help="Input .npy file")
+@click.option("--output", "output_path", required=True, type=click.Path(path_type=Path))
+@click.option("--sr", default=48_000, show_default=True, type=click.IntRange(1))
+@click.option("--duration", default=10.0, show_default=True, type=click.FloatRange(min=0.001))
+@click.option("--repeat", default=10, show_default=True, type=click.IntRange(1))
+@click.option(
+    "--instrument", default="violin", show_default=True, type=click.Choice(["violin", "piano"])
+)
+@click.option("--no-instrument", is_flag=True, help="Disable instrument-response convolution")
+@click.option("--downsample", default=None, type=click.IntRange(1))
+def profile(
+    input_path: Path,
+    output_path: Path,
+    sr: int,
+    duration: float,
+    repeat: int,
+    instrument: str,
+    no_instrument: bool,
+    downsample: int | None,
+) -> None:
+    """Sonify a profile, or the time profile of a 2-D array."""
     from .profile import profile_to_wave
-    data = np.load(input_path)
-    inst = None if no_instrument else instrument
-    profile_to_wave(data, sr=sr, duration=duration, repeat=repeat,
-                    instrument=inst, time_downsample=downsample, output=output_path)
+
+    data = np.load(input_path, allow_pickle=False)
+    profile_to_wave(
+        data,
+        sr=sr,
+        duration=duration,
+        repeat=repeat,
+        instrument=None if no_instrument else instrument,
+        time_downsample=downsample,
+        output=output_path,
+    )
     click.echo(f"Saved to {output_path}")
 
 
 @main.command()
-@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
-@click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--sr", default=48000, type=click.IntRange(1), help="Sample rate (Hz)")
-@click.option("--duration", default=2.0, type=click.FloatRange(min=0.001), help="Duration (seconds)")
-@click.option("--freq", default=1000.0, type=click.FloatRange(min=1e-3), help="Carrier frequency (Hz)")
-@click.option("--downsample", default=None, type=click.IntRange(1), help="Time downsample factor")
-def amplitude(input_path, output_path, sr, duration, freq, downsample):
-    """Sonify using amplitude modulation (Method 2)."""
+@click.option("--input", "input_path", required=True, type=_INPUT_NPY, help="Input .npy file")
+@click.option("--output", "output_path", required=True, type=click.Path(path_type=Path))
+@click.option("--sr", default=48_000, show_default=True, type=click.IntRange(1))
+@click.option("--duration", default=2.0, show_default=True, type=click.FloatRange(min=0.001))
+@click.option("--freq", default=1_000.0, show_default=True, type=click.FloatRange(min=0.001))
+@click.option("--repeat", default=1, show_default=True, type=click.IntRange(1))
+@click.option("--compression", default=99.0, show_default=True, type=click.FloatRange(min=0.0))
+@click.option("--downsample", default=None, type=click.IntRange(1))
+def amplitude(
+    input_path: Path,
+    output_path: Path,
+    sr: int,
+    duration: float,
+    freq: float,
+    repeat: int,
+    compression: float,
+    downsample: int | None,
+) -> None:
+    """Sonify a profile by mapping amplitude to carrier loudness."""
     from .amplitude import amplitude_modulate
-    data = np.load(input_path)
-    amplitude_modulate(data, sr=sr, duration=duration, freq=freq,
-                       time_downsample=downsample, output=output_path)
+
+    data = np.load(input_path, allow_pickle=False)
+    amplitude_modulate(
+        data,
+        sr=sr,
+        duration=duration,
+        freq=freq,
+        repeat=repeat,
+        compression=compression,
+        time_downsample=downsample,
+        output=output_path,
+    )
     click.echo(f"Saved to {output_path}")
 
 
 @main.command()
-@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
-@click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--sr", default=48000, type=click.IntRange(1), help="Sample rate (Hz)")
-@click.option("--n-iter", default=200, type=click.IntRange(1), help="Griffin-Lim iterations")
-@click.option("--n-mels", default=512, type=click.IntRange(1), help="Number of mel bands")
-@click.option("--n-fft", default=4096, type=click.IntRange(2), help="FFT size")
-@click.option("--time-rebin", default=None, type=click.IntRange(1), help="Time downsample bins")
-@click.option("--freq-rebin", default=None, type=click.IntRange(1), help="Freq downsample bins")
+@click.option("--input", "input_path", required=True, type=_INPUT_NPY, help="Input .npy file")
+@click.option("--output", "output_path", required=True, type=click.Path(path_type=Path))
+@click.option("--sr", default=48_000, show_default=True, type=click.IntRange(1))
+@click.option("--n-iter", default=64, show_default=True, type=click.IntRange(1))
+@click.option(
+    "--n-mels", default=None, type=click.IntRange(1), help="Deprecated alias for --freq-rebin"
+)
+@click.option("--n-fft", default=4_096, show_default=True, type=click.IntRange(2))
+@click.option("--time-rebin", default=None, type=click.IntRange(1))
+@click.option("--freq-rebin", default=None, type=click.IntRange(1))
 @click.option("--clean", is_flag=True, help="Apply burst cleaning")
-def griffinlim(input_path, output_path, sr, n_iter, n_mels, n_fft, time_rebin, freq_rebin, clean):
-    """Sonify using Griffin-Lim vocoder (Method 3)."""
-    from .griffinlim import griffinlim as gl
-    data = np.load(input_path)
-    gl(data, sr=sr, n_iter=n_iter, n_mels=n_mels, n_fft=n_fft,
-       time_rebin=time_rebin, freq_rebin=freq_rebin, clean=clean, output=output_path)
+def griffinlim(
+    input_path: Path,
+    output_path: Path,
+    sr: int,
+    n_iter: int,
+    n_mels: int | None,
+    n_fft: int,
+    time_rebin: int | None,
+    freq_rebin: int | None,
+    clean: bool,
+) -> None:
+    """Sonify a dynamic spectrum with Griffin-Lim."""
+    from .griffinlim import griffinlim as run_griffinlim
+
+    if n_mels is not None and freq_rebin is not None:
+        raise click.UsageError("--n-mels and --freq-rebin cannot be supplied together")
+    data = np.load(input_path, allow_pickle=False)
+    run_griffinlim(
+        data,
+        sr=sr,
+        n_iter=n_iter,
+        n_fft=n_fft,
+        time_rebin=time_rebin,
+        freq_rebin=freq_rebin if freq_rebin is not None else n_mels,
+        clean=clean,
+        output=output_path,
+    )
     click.echo(f"Saved to {output_path}")
 
 
 @main.command()
-@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .npy file")
-@click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--time-rebin", default=None, type=click.IntRange(1), help="Time downsample bins")
+@click.option("--input", "input_path", required=True, type=_INPUT_NPY, help="Input .npy file")
+@click.option("--output", "output_path", required=True, type=click.Path(path_type=Path))
+@click.option("--time-rebin", default=None, type=click.IntRange(1))
+@click.option("--time-smoothing", default=None, type=click.FloatRange(min=0.0))
 @click.option("--clean", is_flag=True, help="Apply burst cleaning")
-def hifigan(input_path, output_path, time_rebin, clean):
-    """Sonify using HiFi-GAN neural vocoder (Method 4)."""
-    from .hifigan import hifigan as hf
-    data = np.load(input_path)
-    hf(data, time_rebin=time_rebin, clean=clean, output=output_path)
+def hifigan(
+    input_path: Path,
+    output_path: Path,
+    time_rebin: int | None,
+    time_smoothing: float | None,
+    clean: bool,
+) -> None:
+    """Sonify a dynamic spectrum with the optional HiFi-GAN backend."""
+    from .hifigan import hifigan as run_hifigan
+
+    data = np.load(input_path, allow_pickle=False)
+    run_hifigan(
+        data,
+        time_rebin=time_rebin,
+        time_smoothing=time_smoothing,
+        clean=clean,
+        output=output_path,
+    )
     click.echo(f"Saved to {output_path}")
 
 
 @main.command()
-@click.option("--input", "input_path", required=True, type=click.Path(exists=True), help="Input .wav file")
-@click.option("--output", "output_path", required=True, help="Output .wav file")
-@click.option("--decoder-id", default=2, type=click.IntRange(0, 5), help="Style decoder (0-5)")
-@click.option("--checkpoint-type", default="bestmodel", help="bestmodel or lastmodel")
-@click.option("--sr", default=48000, type=click.IntRange(1), help="Sample rate (Hz)")
-def musicnet(input_path, output_path, decoder_id, checkpoint_type, sr):
-    """Sonify using WaveNet style transfer (Method 5)."""
-    from .musicnet import musicnet as mn
-    mn(input_path, decoder_id=decoder_id, checkpoint_type=checkpoint_type,
-       sr=sr, output=output_path)
+@click.option("--input", "input_path", required=True, type=_INPUT_WAV, help="Input .wav file")
+@click.option("--output", "output_path", required=True, type=click.Path(path_type=Path))
+@click.option("--decoder-id", default=2, show_default=True, type=click.IntRange(0, 5))
+@click.option(
+    "--checkpoint-type",
+    default="bestmodel",
+    show_default=True,
+    type=click.Choice(["bestmodel", "lastmodel"]),
+)
+@click.option("--split-size", default=20, show_default=True, type=click.IntRange(1))
+@click.option("--num-threads", default=1, show_default=True, type=click.IntRange(1))
+@click.option("--seed", default=0, show_default=True, type=click.IntRange(0))
+def musicnet(
+    input_path: Path,
+    output_path: Path,
+    decoder_id: int,
+    checkpoint_type: str,
+    split_size: int,
+    num_threads: int,
+    seed: int,
+) -> None:
+    """Apply the optional MusicNet postprocessor to a WAV file."""
+    from .musicnet import musicnet as run_musicnet
+
+    run_musicnet(
+        input_path,
+        decoder_id=decoder_id,
+        checkpoint_type=checkpoint_type,
+        split_size=split_size,
+        num_threads=num_threads,
+        seed=seed,
+        output=output_path,
+    )
     click.echo(f"Saved to {output_path}")
 
 
 @main.command("download-examples")
-@click.option("--dest", default="./data", help="Destination directory")
-def download_examples(dest):
-    """Download example data files from Hugging Face Hub."""
-    import os
-
+@click.option("--dest", default="./data", show_default=True, type=click.Path(path_type=Path))
+def download_examples(dest: Path) -> None:
+    """Download the pinned example arrays."""
     from .hub import EXAMPLE_MAP, load_example
-    os.makedirs(dest, exist_ok=True)
+
+    dest.mkdir(parents=True, exist_ok=True)
     for name, filename in EXAMPLE_MAP.items():
         click.echo(f"Downloading {name} ({filename})...")
-        data = load_example(name)
-        out_path = os.path.join(dest, filename)
-        np.save(out_path, data)
-        click.echo(f"  Saved to {out_path}")
+        np.save(dest / filename, load_example(name))
+        click.echo(f"  Saved to {dest / filename}")
     click.echo("Done!")

@@ -26,12 +26,6 @@ def get_padding(kernel_size, dilation=1):
     return int((kernel_size * dilation - dilation) / 2)
 
 
-def init_weights(m, mean=0.0, std=0.01):
-    classname = m.__class__.__name__
-    if classname.find("Conv") != -1:
-        m.weight.data.normal_(mean, std)
-
-
 class ResBlock1(torch.nn.Module):
     def __init__(self, h, channels, kernel_size=3, dilation=(1, 3, 5)):
         super().__init__()
@@ -44,7 +38,6 @@ class ResBlock1(torch.nn.Module):
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[2],
                                padding=get_padding(kernel_size, dilation[2])))
         ])
-        self.convs1.apply(init_weights)
         self.convs2 = nn.ModuleList([
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
                                padding=get_padding(kernel_size, 1))),
@@ -53,7 +46,6 @@ class ResBlock1(torch.nn.Module):
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
                                padding=get_padding(kernel_size, 1)))
         ])
-        self.convs2.apply(init_weights)
 
     def forward(self, x):
         for c1, c2 in zip(self.convs1, self.convs2):
@@ -81,7 +73,6 @@ class ResBlock2(torch.nn.Module):
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
                                padding=get_padding(kernel_size, dilation[1])))
         ])
-        self.convs.apply(init_weights)
 
     def forward(self, x):
         for c in self.convs:
@@ -101,6 +92,7 @@ class Generator(torch.nn.Module):
         self.h = h
         self.num_kernels = len(h.resblock_kernel_sizes)
         self.num_upsamples = len(h.upsample_rates)
+        final_channels = h.upsample_initial_channel // (2 ** self.num_upsamples)
         self.conv_pre = weight_norm(Conv1d(80, h.upsample_initial_channel, 7, 1, padding=3))
         resblock = ResBlock1 if h.resblock == '1' else ResBlock2
 
@@ -117,9 +109,7 @@ class Generator(torch.nn.Module):
             for k, d in zip(h.resblock_kernel_sizes, h.resblock_dilation_sizes):
                 self.resblocks.append(resblock(h, ch, k, d))
 
-        self.conv_post = weight_norm(Conv1d(ch, 1, 7, 1, padding=3))
-        self.ups.apply(init_weights)
-        self.conv_post.apply(init_weights)
+        self.conv_post = weight_norm(Conv1d(final_channels, 1, 7, 1, padding=3))
 
     def forward(self, x):
         x = self.conv_pre(x)
