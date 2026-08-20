@@ -17,6 +17,12 @@ musicnet_module = importlib.import_module("radiosonify.musicnet")
 pipeline_module = importlib.import_module("radiosonify.pipeline")
 
 
+def _patch_hifigan_runner(monkeypatch, runner):
+    """Replace the optional HiFi-GAN runtime as one isolated test double."""
+    monkeypatch.setattr(hifigan_module, "hifigan", runner)
+    monkeypatch.setattr(hifigan_module, "_preflight_hifigan", lambda: None)
+
+
 def test_unified_profile_auto_method_uses_physical_duration_and_speed(tmp_path):
     output = tmp_path / "nested" / "profile.wav"
     result = rs.sonify(
@@ -218,7 +224,7 @@ def test_cross_method_output_duration_contract(method, speed, repeat, monkeypatc
         return np.linspace(-1, 1, 137), 1_000
 
     monkeypatch.setattr(griffinlim_module, "griffinlim", fake_dynamic_method)
-    monkeypatch.setattr(hifigan_module, "hifigan", fake_dynamic_method)
+    _patch_hifigan_runner(monkeypatch, fake_dynamic_method)
 
     dynamic = method in {"griffinlim", "hifigan"}
     data = np.ones((8, 8)) if dynamic else np.linspace(0, 1, 8)
@@ -250,7 +256,7 @@ def test_output_sr_normalizes_all_primary_method_containers(monkeypatch):
         return np.linspace(-1, 1, 441), 22_050
 
     monkeypatch.setattr(griffinlim_module, "griffinlim", fake_griffinlim)
-    monkeypatch.setattr(hifigan_module, "hifigan", fake_hifigan)
+    _patch_hifigan_runner(monkeypatch, fake_hifigan)
     cases = (
         ("profile", np.linspace(0, 1, 8), {"sr": 8_000}, 8_000),
         ("amplitude", np.linspace(0, 1, 8), {"sr": 12_000}, 12_000),
@@ -307,7 +313,7 @@ def test_output_sr_conversion_preserves_physical_pitch_even_when_requested(monke
         del data, output, params
         return tone, native_sr
 
-    monkeypatch.setattr(hifigan_module, "hifigan", fake_hifigan)
+    _patch_hifigan_runner(monkeypatch, fake_hifigan)
     result = rs.sonify(
         np.ones((8, 8)),
         data_duration=duration,
@@ -527,7 +533,7 @@ def test_hifigan_auto_frames_follow_requested_audio_duration(monkeypatch):
         samples = expected_bins * 256
         return np.sin(np.linspace(0, 4 * np.pi, samples)), 22_050
 
-    monkeypatch.setattr(hifigan_module, "hifigan", fake_hifigan)
+    _patch_hifigan_runner(monkeypatch, fake_hifigan)
     time = np.arange(1_000, dtype=np.float64)[:, None]
     feature = np.arange(160, dtype=np.float64)[None, :]
     data = 20 + 0.001 * time + 0.0001 * feature
@@ -561,7 +567,7 @@ def test_hifigan_auto_frames_do_not_invent_time_bins(monkeypatch):
         received_shapes.append(data.shape)
         return np.sin(np.linspace(0, 4 * np.pi, 2_205)), 22_050
 
-    monkeypatch.setattr(hifigan_module, "hifigan", fake_hifigan)
+    _patch_hifigan_runner(monkeypatch, fake_hifigan)
     result = rs.sonify(
         np.arange(32.0).reshape(8, 4),
         data_duration=0.1,
@@ -580,7 +586,7 @@ def test_explicit_preprocess_time_rebin_overrides_method_auto_sizing(monkeypatch
         received_shapes.append(data.shape)
         return np.sin(np.linspace(0, 4 * np.pi, 2_205)), 22_050
 
-    monkeypatch.setattr(hifigan_module, "hifigan", fake_hifigan)
+    _patch_hifigan_runner(monkeypatch, fake_hifigan)
     result = rs.sonify(
         np.arange(12.0).reshape(4, 3),
         data_duration=0.1,
@@ -615,7 +621,7 @@ def test_unified_hifigan_does_not_boost_quiet_generator_output(monkeypatch):
         del data, output, params
         return tone, 22_050
 
-    monkeypatch.setattr(hifigan_module, "hifigan", fake_hifigan)
+    _patch_hifigan_runner(monkeypatch, fake_hifigan)
     result = rs.sonify(
         np.arange(64.0).reshape(8, 8),
         data_duration=1,
