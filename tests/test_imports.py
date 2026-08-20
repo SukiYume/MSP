@@ -25,6 +25,12 @@ heavy = [
     "radiosonify.hifigan",
     "radiosonify.hub",
     "radiosonify.musicnet",
+    "radiosonify._events",
+    "radiosonify._perceptual",
+    "radiosonify._voices",
+    "radiosonify.erb",
+    "radiosonify.rave",
+    "radiosonify.spatial",
 ]
 print([name for name in heavy if name in sys.modules])
 """
@@ -33,21 +39,41 @@ print([name for name in heavy if name in sys.modules])
     assert output == "[]"
 
 
-def test_top_level_lazy_functions_survive_submodule_first_imports():
+def test_same_named_submodules_keep_standard_import_semantics():
     output = _run_isolated_import(
         """
-import importlib
+from types import ModuleType
 import radiosonify
-for name in ("griffinlim", "hifigan", "musicnet"):
-    importlib.import_module(f"radiosonify.{name}")
-    print(name, callable(getattr(radiosonify, name)))
+import radiosonify.griffinlim as griffinlim_module
+import radiosonify.hifigan as hifigan_module
+import radiosonify.musicnet as musicnet_module
+import radiosonify.rave as rave_module
+for name, module in (
+    ("griffinlim", griffinlim_module),
+    ("hifigan", hifigan_module),
+    ("musicnet", musicnet_module),
+    ("rave", rave_module),
+):
+    print(name, isinstance(module, ModuleType), getattr(radiosonify, name) is module)
+for alias in (
+    "griffinlim_reconstruct",
+    "hifigan_vocode",
+    "musicnet_transform",
+    "rave_transform",
+):
+    print(alias, callable(getattr(radiosonify, alias)))
 """
     )
 
     assert output.splitlines() == [
-        "griffinlim True",
-        "hifigan True",
-        "musicnet True",
+        "griffinlim True True",
+        "hifigan True True",
+        "musicnet True True",
+        "rave True True",
+        "griffinlim_reconstruct True",
+        "hifigan_vocode True",
+        "musicnet_transform True",
+        "rave_transform True",
     ]
 
 

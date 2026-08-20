@@ -54,7 +54,7 @@ class TestProfileToWave:
         mock_get_path.return_value = str(wav_path)
 
         with pytest.raises(ValueError, match="no usable AC signal"):
-            profile_to_wave(np.arange(16.0), duration=0.01, instrument="violin")
+            profile_to_wave(np.arange(16.0) / 15, duration=0.01, instrument="violin")
 
     @patch("radiosonify.profile.get_instrument_path")
     def test_short_profile_keeps_causal_instrument_attack(self, mock_get_path, tmp_path):
@@ -67,10 +67,9 @@ class TestProfileToWave:
         mock_get_path.return_value = str(wav_path)
 
         audio, _ = profile_to_wave(
-            np.array([0.0, 1.0, 0.0, -0.5]),
+            np.array([1 / 3, 1.0, 1 / 3, 0.0]),
             sr=48_000,
             duration=0.005,
-            repeat=5,
             instrument="violin",
         )
 
@@ -104,12 +103,15 @@ class TestProfileToWave:
         with pytest.raises(ValueError, match="instrument"):
             profile_to_wave(np.ones(100), duration=0.01, instrument="drums")
 
+    def test_rejects_profile_that_skipped_shared_preprocessing(self):
+        with pytest.raises(ValueError, match="preprocess"):
+            profile_to_wave(np.arange(10.0), duration=0.01, instrument=None)
+
     @pytest.mark.parametrize(
         ("kwargs", "message"),
         [
             ({"sr": 0}, "sr"),
             ({"duration": 0}, "duration"),
-            ({"repeat": 0}, "repeat"),
         ],
     )
     def test_rejects_invalid_output_parameters(self, kwargs, message):

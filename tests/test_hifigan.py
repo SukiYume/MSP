@@ -33,11 +33,9 @@ def test_preprocessing_scans_input_finiteness_once(monkeypatch):
 
     monkeypatch.setattr(core_module.np, "isfinite", tracked_isfinite)
     prepared = hifigan_module._prepare_spectrogram(
-        np.arange(256, dtype=np.float64).reshape(16, 16),
+        np.arange(256, dtype=np.float64).reshape(16, 16) / 255,
         time_rebin=8,
         time_smoothing=None,
-        clean=True,
-        exposure_cut=25,
     )
 
     assert prepared.shape == (8, 16)
@@ -125,6 +123,21 @@ class _FakeTorch:
         return _FakeTensor(x)
 
 
+def test_checkpoint_type_error_never_falls_back_to_unsafe_pickle_loading():
+    class FailingTorch:
+        calls = []
+
+        @classmethod
+        def load(cls, path, **kwargs):
+            cls.calls.append((path, kwargs))
+            raise TypeError("checkpoint decoding failed")
+
+    with pytest.raises(TypeError, match="decoding failed"):
+        hifigan_module._torch_load_state_dict(FailingTorch, "checkpoint.pth", "cpu")
+
+    assert FailingTorch.calls == [("checkpoint.pth", {"map_location": "cpu", "weights_only": True})]
+
+
 class _FakeAttrDict(dict[str, object]):
     def __getattr__(self, item):
         return self[item]
@@ -197,8 +210,60 @@ class TestHifiGAN:
         def fake_resize(data, shape):
             return np.resize(data, shape)
 
-        out = hifigan_module._rescale_data(spec, fake_resize)
+        out, offset = hifigan_module._rescale_data(spec, fake_resize)
         assert out.shape == (1, 80, 128)
+        assert isinstance(offset, float)
+
+    def test_model_adapter_owns_80_bin_resize_and_range_restoration(self):
+        spec = np.tile(np.linspace(0.2, 0.8, 512), (16, 1))
+        calls = []
+
+        def fake_resize(data, shape):
+            calls.append((data.shape, shape))
+            return np.resize(data, shape)
+
+        original, _ = hifigan_module._rescale_data(spec, fake_resize)
+        half_scale, _ = hifigan_module._rescale_data(spec * 0.5, fake_resize)
+
+        assert calls == [((16, 512), (16, 80)), ((16, 512), (16, 80))]
+        assert np.allclose(original, half_scale)
+
+    def test_model_adapter_matches_historical_checkpoint_mapping(self):
+        """Lock the published resize/histogram/magic-number transform verbatim."""
+        spec = np.random.default_rng(7).random((32, 512))
+
+        def fake_resize(data, shape):
+            return np.resize(data, shape)
+
+        resized = fake_resize(spec, (spec.shape[0], 80))
+        resized = (resized - resized.min()) / (resized.max() - resized.min())
+        h, w = resized.shape
+        histogram = np.histogram(resized.ravel(), bins=int(h * w / 100))
+        centres = (histogram[1][1:] + histogram[1][:-1]) / 2
+        expected_offset = 0.6 - centres[np.argmax(histogram[0])]
+        expected = np.clip((resized + expected_offset) * 12 - 10.5, -11, 1.6)
+        expected = expected.T[np.newaxis, :, :]
+
+        actual, actual_offset = hifigan_module._rescale_data(spec, fake_resize)
+
+        assert actual_offset == pytest.approx(expected_offset)
+        assert np.array_equal(actual, expected)
+
+    def test_histogram_offset_is_reported_for_provenance(self):
+        """直方图偏移随输入分布变化，是这一步唯一的数据依赖量，必须能被记录。"""
+
+        def fake_resize(data, shape):
+            return np.resize(data, shape)
+
+        low = np.zeros((16, 80))
+        low[:, -1] = 1
+        high = np.ones((16, 80))
+        high[:, 0] = 0
+
+        _, low_offset = hifigan_module._rescale_data(low, fake_resize)
+        _, high_offset = hifigan_module._rescale_data(high, fake_resize)
+
+        assert low_offset != high_offset
 
     @pytest.mark.parametrize(
         "spec",
@@ -212,7 +277,7 @@ class TestHifiGAN:
         def fake_resize(data, shape):
             return np.resize(data, shape)
 
-        out = hifigan_module._rescale_data(spec, fake_resize)
+        out, _ = hifigan_module._rescale_data(spec, fake_resize)
         assert out.shape == (1, 80, spec.shape[0])
         assert np.all(np.isfinite(out))
         assert out.min() >= -11.0
@@ -229,16 +294,23 @@ class TestHifiGAN:
             hifigan_module.hifigan(spec)
 
     def test_rejects_invalid_rebin_before_loading_optional_dependencies(self):
-        with pytest.raises(ValueError, match="time_bins"):
-            hifigan_module.hifigan(np.ones((4, 4)), time_rebin=5)
+        with pytest.raises(ValueError, match="time_rebin"):
+            hifigan_module.hifigan(np.ones((4, 4)), time_rebin=0)
 
-    def test_rejects_non_boolean_clean_before_loading_optional_dependencies(self):
-        with pytest.raises(ValueError, match="clean"):
-            hifigan_module.hifigan(np.ones((4, 4)), clean="no")
+    def test_direct_low_level_rebin_can_upsample(self):
+        prepared = hifigan_module._prepare_spectrogram(
+            np.arange(16.0).reshape(4, 4) / 15,
+            time_rebin=9,
+            time_smoothing=None,
+        )
 
-    def test_rejects_exposure_cut_even_when_clean_is_disabled(self):
-        with pytest.raises(ValueError, match="exposure_cut"):
-            hifigan_module.hifigan(np.ones((4, 4)), clean=False, exposure_cut=1)
+        assert prepared.shape == (9, 4)
+        assert prepared.min() >= 0
+        assert prepared.max() <= 1
+
+    def test_rejects_data_that_skipped_shared_preprocessing(self):
+        with pytest.raises(ValueError, match="preprocess"):
+            hifigan_module.hifigan(np.arange(16.0).reshape(4, 4))
 
     @pytest.mark.parametrize("time_smoothing", [0, -1, np.inf, True, "0.75"])
     def test_rejects_invalid_time_smoothing_before_loading_model(self, time_smoothing):
@@ -274,8 +346,24 @@ class TestHifiGAN:
         assert audio.ndim == 1
         assert np.all(np.isfinite(audio))
         assert np.max(np.abs(audio)) > 1e-6
-        assert np.max(np.abs(audio)) <= 0.9 + 1e-6
+        assert np.max(np.abs(audio)) <= 1.0 + 1e-6
+        assert np.max(np.abs(audio)) > 0.99
         assert sr == 48000
+
+    def test_does_not_peak_normalize_quiet_generator_output(
+        self,
+        fake_hifigan_runtime,
+        monkeypatch,
+    ):
+        def quiet_generator(self, x_tensor):
+            del self, x_tensor
+            values = 0.08 * np.sin(np.linspace(0, 4 * np.pi, 1024, dtype=np.float32))
+            return _FakeTensor(values)
+
+        monkeypatch.setattr(_FakeGenerator, "__call__", quiet_generator)
+        audio, _ = hifigan_module.hifigan(np.ones((32, 80)))
+
+        assert np.max(np.abs(audio)) == pytest.approx(0.08, rel=1e-4)
 
     def test_reuses_loaded_generator(self, fake_hifigan_runtime):
         spec = np.random.default_rng(42).random((256, 1024))
@@ -285,16 +373,16 @@ class TestHifiGAN:
 
         assert _FakeGenerator.init_count == 1
 
-    def test_top_level_neural_method_remains_callable_after_first_call(
+    def test_top_level_neural_alias_remains_callable_after_first_call(
         self,
         fake_hifigan_runtime,
     ):
         spec = np.random.default_rng(42).random((32, 64))
 
-        rs.hifigan(spec)
-        assert callable(rs.hifigan)
-        rs.hifigan(spec)
-        assert callable(rs.hifigan)
+        rs.hifigan_vocode(spec)
+        assert callable(rs.hifigan_vocode)
+        rs.hifigan_vocode(spec)
+        assert callable(rs.hifigan_vocode)
 
     def test_saves_to_file(self, fake_hifigan_runtime, tmp_path):
         spec = np.random.default_rng(42).random((256, 1024))

@@ -1,11 +1,11 @@
 [build-system]
-requires = ["hatchling>=1.26"]
+requires = ["hatchling>=1.27,<1.28"]
 build-backend = "hatchling.build"
 
 [project]
 name = "radiosonify"
 dynamic = ["version"]
-description = "Unified, duration-aware sonification for radio profiles and dynamic spectra"
+description = "Unified, duration-aware sonification for numerical profiles and multidimensional arrays"
 readme = "README.md"
 license = "MIT AND CC-BY-NC-4.0"
 license-files = [
@@ -22,6 +22,8 @@ keywords = [
     "sonification",
     "radio-pulse",
     "dynamic-spectrum",
+    "multidimensional-data",
+    "image-sonification",
     "audio",
     "FRB",
 ]
@@ -49,11 +51,13 @@ dependencies = [
 [project.optional-dependencies]
 hifigan = ["torch>=2.0", "scikit-image>=0.20"]
 musicnet = ["torch>=2.0", "tqdm>=4.64"]
-all = ["radiosonify[hifigan,musicnet]"]
+rave = ["torch>=2.0"]
+all = ["radiosonify[hifigan,musicnet,rave]"]
 dev = [
     "build>=1.2",
     "pytest>=7.4",
     "pytest-cov>=4.1",
+    "mypy>=1.10",
     "ruff>=0.4",
     "twine>=5.1",
 ]
@@ -90,6 +94,13 @@ packages = ["src/radiosonify"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+# Current mypy releases type-check 3.10+ syntax; Python 3.9 compatibility is
+# enforced by the runtime CI matrix and Ruff's py39 target.
+python_version = "3.10"
+files = ["src/radiosonify"]
+ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py39"

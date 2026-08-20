@@ -9,6 +9,7 @@ from argparse import Namespace
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TypedDict
 
 import numpy as np
 
@@ -22,11 +23,19 @@ from .core import (
     save_audio,
 )
 from .hub import get_model_path
-from .timing import fit_audio_duration
+from .timing import _resample_audio_rate
 
 _logger = logging.getLogger(__name__)
 _ENCODER_POOL = 800
 _MUSICNET_SAMPLE_RATE = 16_000
+
+
+class _MusicNetParameters(TypedDict):
+    decoder_id: int
+    checkpoint_type: str
+    split_size: int
+    num_threads: int | None
+    seed: int | None
 
 
 def _require_torch():
@@ -73,7 +82,7 @@ def _validate_musicnet_parameters(
     split_size: int,
     num_threads: int | None,
     seed: int | None,
-) -> dict[str, int | str | None]:
+) -> _MusicNetParameters:
     """集中校验 API 和底层函数共用的 MusicNet 控制参数。"""
     if (
         isinstance(decoder_id, (bool, np.bool_))
@@ -100,6 +109,33 @@ def _validate_musicnet_parameters(
     }
 
 
+def _preflight_musicnet(
+    *,
+    decoder_id: int,
+    checkpoint_type: str,
+    split_size: int,
+    num_threads: int | None,
+    seed: int | None,
+) -> None:
+    """Resolve optional dependencies and pinned assets before primary synthesis."""
+    del split_size, num_threads, seed
+    _require_torch()
+    _require_tqdm()
+    get_model_path("musicnet", f"{checkpoint_type}_{decoder_id}.pth")
+    args_path = get_model_path("musicnet", "args.json")
+    _load_model_args(args_path)
+
+
+def _pad_for_encoder(data: np.ndarray) -> tuple[np.ndarray, int]:
+    """Pad the final partial 800-sample frame and retain the exact crop length."""
+    original_samples = len(data)
+    remainder = original_samples % _ENCODER_POOL
+    if remainder == 0:
+        return data, original_samples
+    padded = np.pad(data, (0, _ENCODER_POOL - remainder), mode="constant")
+    return padded, original_samples
+
+
 def _load_audio_input(input_audio: str | Path | np.ndarray, sr: int) -> np.ndarray:
     """加载音频，并按预训练模型的固定 16 kHz 契约重采样。"""
     sr = _positive_int(sr, name="sr")
@@ -108,11 +144,7 @@ def _load_audio_input(input_audio: str | Path | np.ndarray, sr: int) -> np.ndarr
         if float(np.max(np.abs(data))) > 1.0 + 1e-7:
             raise ValueError("input_audio must stay within [-1, 1]")
         if sr != _MUSICNET_SAMPLE_RATE:
-            data = fit_audio_duration(
-                data,
-                _MUSICNET_SAMPLE_RATE,
-                len(data) / sr,
-            )
+            data = _resample_audio_rate(data, sr, _MUSICNET_SAMPLE_RATE)
         return _validate_audio_input(data)
 
     input_path = Path(input_audio)
@@ -255,8 +287,9 @@ def musicnet(
         checkpoint_type: 'bestmodel' or 'lastmodel'.
         sr: Sample rate of an array input. Files use their embedded rate.
             Inference and output always use the model's native 16 kHz rate.
-        batch_size: Deprecated compatibility argument. A positive value is
-            accepted but ignored because this entry point handles one recording.
+        batch_size: Deprecated compatibility argument scheduled for removal in
+            0.3.0. A positive value is accepted and ignored because this entry
+            point handles one recording.
         split_size: Split size for autoregressive generation.
         num_threads: CPU threads for decoder. None = keep current. Default 1.
         seed: Non-negative random seed. None keeps stochastic decoding.
@@ -270,7 +303,8 @@ def musicnet(
     if batch_size is not None:
         _positive_int(batch_size, name="batch_size")
         warnings.warn(
-            "batch_size is deprecated and ignored; musicnet processes one recording at a time",
+            "batch_size is deprecated, ignored, and scheduled for removal in 0.3.0; "
+            "musicnet processes one recording at a time",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -282,6 +316,7 @@ def musicnet(
         seed=seed,
     )
     data = _load_audio_input(input_audio, input_sr)
+    data, original_samples = _pad_for_encoder(data)
 
     torch = _require_torch()
     tqdm_module = _require_tqdm()
@@ -344,6 +379,12 @@ def musicnet(
             )
 
     audio = inv_mu_law(decoded.cpu().numpy()).reshape(-1)
+    if len(audio) < original_samples:
+        raise RuntimeError(
+            "MusicNet decoder returned fewer samples than the validated input; "
+            "the checkpoint and vendored model geometry are incompatible"
+        )
+    audio = audio[:original_samples]
     audio = _peak_normalize(audio, peak=0.95)
 
     if output_path is not None:

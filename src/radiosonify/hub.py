@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
+import uuid
 import wave
 from pathlib import Path
 
@@ -19,10 +21,19 @@ from huggingface_hub.utils import (
 REPO_ID = "TorchLight/radiosonify"
 # 固定提交可避免上游同名文件变化后，本地结果在不知情时漂移。
 REVISION = "14d214896b004b8e38e048b36715362637733114"
-CACHE_DIR = os.environ.get(
-    "RADIOSONIFY_CACHE_DIR",
-    os.path.join(os.path.expanduser("~"), ".cache", "radiosonify"),
-)
+_DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "radiosonify")
+CACHE_DIR = os.environ.get("RADIOSONIFY_CACHE_DIR", _DEFAULT_CACHE_DIR)
+
+
+def _cache_dir() -> str:
+    """Resolve the cache directory at call time.
+
+    ``CACHE_DIR`` keeps the value resolved at import. Reading the environment
+    again on each call lets a process that sets ``RADIOSONIFY_CACHE_DIR`` after
+    importing the package still redirect its downloads.
+    """
+    return os.environ.get("RADIOSONIFY_CACHE_DIR", CACHE_DIR)
+
 
 EXAMPLE_MAP = {
     "burst": "Burst.npy",
@@ -38,6 +49,7 @@ INSTRUMENT_MAP = {
 
 _INSTRUMENT_SAMPLE_RATE = 48_000
 _INSTRUMENT_VERSION = "v1"
+_INSTRUMENT_WRITE_LOCK = threading.Lock()
 
 
 def _download_with_context(filename: str) -> str:
@@ -46,7 +58,7 @@ def _download_with_context(filename: str) -> str:
         return hf_hub_download(
             repo_id=REPO_ID,
             filename=filename,
-            cache_dir=CACHE_DIR,
+            cache_dir=_cache_dir(),
             revision=REVISION,
             local_files_only=True,
         )
@@ -57,13 +69,13 @@ def _download_with_context(filename: str) -> str:
             f"Resource '{filename}' not found in Hugging Face repo '{REPO_ID}': {e}"
         ) from e
 
-    last_error = None
+    last_error: Exception | None = None
     for attempt in range(2):
         try:
             return hf_hub_download(
                 repo_id=REPO_ID,
                 filename=filename,
-                cache_dir=CACHE_DIR,
+                cache_dir=_cache_dir(),
                 revision=REVISION,
             )
         except LocalEntryNotFoundError as exc:
@@ -131,17 +143,21 @@ def _synthesize_instrument(name: str) -> np.ndarray:
 def _write_pcm16_atomic(path: Path, audio: np.ndarray) -> None:
     """把生成的单声道响应原子写入缓存，避免并发产生半文件。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     pcm = np.rint(np.clip(audio, -1.0, 1.0) * 32767.0).astype("<i2")
-    try:
-        with wave.open(str(temporary), "wb") as wav:
-            wav.setnchannels(1)
-            wav.setsampwidth(2)
-            wav.setframerate(_INSTRUMENT_SAMPLE_RATE)
-            wav.writeframes(pcm.tobytes())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    # Windows can reject simultaneous replacements of the same destination even
+    # when each writer has a unique temporary file. Serialize the final write in
+    # this process; UUID names continue to protect independent processes.
+    with _INSTRUMENT_WRITE_LOCK:
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        try:
+            with wave.open(str(temporary), "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(_INSTRUMENT_SAMPLE_RATE)
+                wav.writeframes(pcm.tobytes())
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def get_instrument_path(name: str) -> str:
@@ -149,7 +165,7 @@ def get_instrument_path(name: str) -> str:
     if name not in INSTRUMENT_MAP:
         raise ValueError(f"Unknown instrument: {name}. Available: {list(INSTRUMENT_MAP.keys())}")
     destination = (
-        Path(CACHE_DIR) / "generated-instruments" / _INSTRUMENT_VERSION / INSTRUMENT_MAP[name]
+        Path(_cache_dir()) / "generated-instruments" / _INSTRUMENT_VERSION / INSTRUMENT_MAP[name]
     )
     if not destination.is_file():
         _write_pcm16_atomic(destination, _synthesize_instrument(name))

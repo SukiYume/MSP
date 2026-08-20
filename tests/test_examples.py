@@ -41,8 +41,7 @@ def test_unified_example_uses_explicit_duration_and_public_sonify(tmp_path, monk
     assert source.name == "bundled-raw-burst"
     assert np.array_equal(source.data, data)
     assert kwargs == {
-        "method": "amplitude",
-        "method_params": {"freq": 880},
+        "method": "auto",
         "output": output,
     }
 

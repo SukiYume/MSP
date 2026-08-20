@@ -11,6 +11,24 @@ branch is never used at runtime.
 | `models/hifigan/config.json`, `models/hifigan/generator.pth` | HiFi-GAN Universal V1 architecture and base checkpoint from [`jik876/hifi-gan`](https://github.com/jik876/hifi-gan), then fine-tuned by the MSP authors for 500k steps on a collection of 500 symphonic recordings. The historical repository did not retain a machine-readable corpus manifest, so users requiring training-data-level provenance should not treat this checkpoint as fully auditable. | MIT for the upstream implementation and the MSP checkpoint, to the extent of the rights held by their respective authors |
 | `models/musicnet/args.json`, `models/musicnet/{bestmodel,lastmodel}_{0..5}.pth` | Official pretrained MusicNet archive published by Facebook Research for [A Universal Music Translation Network](https://github.com/facebookresearch/music-translation). `args.json` is a safe JSON conversion of the original serialized argument object. | CC BY-NC 4.0; non-commercial use only |
 
+RAVE models are intentionally not bundled, hosted, or downloaded by
+RadioSonify. The `rave` postprocessor accepts a trusted TorchScript export
+supplied by the user. Its provenance and license therefore belong to that
+specific model and must be recorded separately. Because `torch.jit.load`
+executes model code, do not load an untrusted export.
+
+## HiFi-GAN checkpoint input encoding
+
+The HiFi-GAN checkpoint does not consume the shared `[0, 1]` scientific matrix
+directly. Its fixed adapter first resizes the already preprocessed feature axis
+to 80 bins, restores the resized matrix to `[0, 1]`, estimates its histogram
+mode `m`, and applies the historical checkpoint mapping
+`12 * (x + 0.6 - m) - 10.5`, clipped to `[-11, 1.6]`. Equivalently, the
+unclipped expression is `12 * (x - m) - 3.3`. These are empirical
+checkpoint-domain constants, not physical units or general-purpose scientific
+normalization. The data-dependent histogram offset is included in
+`SonificationResult.method_params` for provenance.
+
 On 2026-08-01, all twelve hosted MusicNet checkpoint files were verified as
 follows: their byte size and ZIP CRC match Facebook Research's official
 `pretrained_musicnet.zip`; their SHA-256 values match the files retained in the

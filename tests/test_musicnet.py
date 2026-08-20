@@ -270,14 +270,14 @@ def test_full_musicnet_orchestration_with_fake_runtime(monkeypatch, tmp_path):
 
     class FakeEncoder:
         def __call__(self, samples):
-            assert samples.shape == (1, 1, 1_600)
+            assert samples.shape == (1, 1, 2_400)
             return _FakeTensor(np.ones((1, 4, 3), dtype=np.float32))
 
     class FakeDecoder:
         def generate(self, condition, *, init, pbar):
             decoder_init_flags.append(init)
             pbar.update(condition.size(2))
-            values = np.full((1, 1, condition.size(2) * 4), 129, dtype=np.int16)
+            values = np.full((1, 1, condition.size(2) * 800), 129, dtype=np.int16)
             return _FakeTensor(values)
 
     args_path = tmp_path / "args.json"
@@ -301,14 +301,14 @@ def test_full_musicnet_orchestration_with_fake_runtime(monkeypatch, tmp_path):
         lambda *args, **kwargs: (FakeEncoder(), FakeDecoder()),
     )
     audio, sr = musicnet_module.musicnet(
-        np.linspace(-1, 1, 1_600),
+        np.linspace(-1, 1, 1_601),
         split_size=1,
         seed=7,
         output=output_path,
     )
 
     assert sr == 16_000
-    assert len(audio) == 12
+    assert len(audio) == 1_601
     assert audio.dtype == np.float32
     assert np.max(np.abs(audio)) == pytest.approx(0.95)
     assert decoder_init_flags == [True, False, False]
@@ -316,6 +316,22 @@ def test_full_musicnet_orchestration_with_fake_runtime(monkeypatch, tmp_path):
     assert _FakeTqdm.progresses[0].updates == 3
     assert _FakeTorch.threads == 8
     assert output_path.is_file()
+
+
+@pytest.mark.parametrize(
+    ("length", "padded_length"),
+    [(800, 800), (801, 1_600), (1_599, 1_600), (1_600, 1_600)],
+)
+def test_encoder_padding_preserves_the_original_crop_length(length, padded_length):
+    data = np.linspace(-1, 1, length)
+
+    padded, original = musicnet_module._pad_for_encoder(data)
+
+    assert original == length
+    assert len(padded) == padded_length
+    np.testing.assert_array_equal(padded[:length], data)
+    if padded_length > length:
+        assert np.all(padded[length:] == 0)
 
 
 def test_musicnet_defaults_to_the_pretrained_models_native_sample_rate():

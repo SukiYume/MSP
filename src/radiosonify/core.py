@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+from collections.abc import Mapping
 from numbers import Real
 from pathlib import Path
 from typing import Any
@@ -9,16 +11,25 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
+_MAD_TO_GAUSSIAN_SIGMA = 1.4826
+
 # ---------- 数值输入与参数校验 ----------
 
 
-def _as_finite_array(
+def _as_real_array(
     data: Any,
     *,
     name: str = "data",
     ndim: int | tuple[int, ...] | None = None,
+    allow_nan: bool = False,
 ) -> np.ndarray:
-    """把输入转换为非空、有限、实数 ``float64`` 数组。"""
+    """把输入转换为非空实数 ``float64`` 数组。
+
+    ``allow_nan=True`` 只放行 NaN，不放行 ``±Inf``。NaN 在射电数据里有确定含义
+    （被掩掉的频率通道 / 缺测样本），可以由预处理的 ``nan_policy`` 决定如何处理；
+    ``Inf`` 没有对应的物理含义，且会让分位数和 min-max 归一化整体失效，
+    因此在任何策略下都直接拒绝。
+    """
     try:
         raw = np.asarray(data)
     except (TypeError, ValueError) as exc:
@@ -37,12 +48,72 @@ def _as_finite_array(
         if array.ndim not in valid_ndims:
             expected = " or ".join(f"{value}D" for value in valid_ndims)
             raise ValueError(f"{name} must be {expected}")
-    if not np.all(np.isfinite(array)):
+    if allow_nan:
+        if np.isinf(array).any():
+            raise ValueError(f"{name} must not contain infinite values")
+    elif not np.all(np.isfinite(array)):
         raise ValueError(f"{name} must contain only finite values")
     return array
 
 
-def _positive_int(value: int, *, name: str) -> int:
+def _as_finite_array(
+    data: Any,
+    *,
+    name: str = "data",
+    ndim: int | tuple[int, ...] | None = None,
+) -> np.ndarray:
+    """把输入转换为非空、有限、实数 ``float64`` 数组。"""
+    return _as_real_array(data, name=name, ndim=ndim, allow_nan=False)
+
+
+def _immutable_array(data: Any, *, dtype: Any | None = None) -> np.ndarray:
+    """Return a C-contiguous array backed by an immutable bytes object.
+
+    ``array.setflags(write=False)`` is reversible when an array owns a mutable
+    allocation. Building the public snapshot from ``bytes`` makes NumPy's
+    write-protection structural, so ``setflags(write=True)`` cannot reopen the
+    provenance buffer for mutation.
+    """
+    array = np.asarray(data, dtype=dtype)
+    if array.dtype.hasobject:
+        raise TypeError("immutable snapshots do not support object arrays")
+    # ``tobytes(order="C")`` serializes any strided layout in C order on its
+    # own. A separate contiguity pass would add a second full-size copy for
+    # exactly the transposed views ``_standard_layout`` builds from 3-D input,
+    # which is where peak memory already matters most.
+    frozen = np.frombuffer(array.tobytes(order="C"), dtype=array.dtype)
+    return frozen.reshape(array.shape)
+
+
+def _merge_settings(
+    defaults: Mapping[str, Any],
+    supplied: Mapping[str, Any] | None,
+    *,
+    field_name: str,
+    unknown_label: str,
+) -> dict[str, Any]:
+    """Merge one public settings mapping over its defaults.
+
+    Method parameters, preprocessing parameters, postprocessor parameters and
+    the grouped perceptual voice/event mappings are all keyword containers with
+    the same contract, so they share one container check, one string-key check,
+    and one unknown-key report.
+    """
+    if supplied is None:
+        return dict(defaults)
+    if not isinstance(supplied, Mapping):
+        raise ValueError(f"{field_name} must be a mapping or None")
+    if any(not isinstance(key, str) for key in supplied):
+        raise ValueError(f"{field_name} keys must be strings")
+    unknown = sorted(set(supplied) - set(defaults))
+    if unknown:
+        joined = ", ".join(unknown)
+        allowed = ", ".join(defaults)
+        raise ValueError(f"{unknown_label}: {joined}; allowed: {allowed}")
+    return {**defaults, **supplied}
+
+
+def _positive_int(value: Any, *, name: str) -> int:
     """校验正整数；布尔值不能冒充 0/1。"""
     if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
         raise ValueError(f"{name} must be a positive integer")
@@ -52,7 +123,7 @@ def _positive_int(value: int, *, name: str) -> int:
     return result
 
 
-def _nonnegative_int(value: int, *, name: str) -> int:
+def _nonnegative_int(value: Any, *, name: str) -> int:
     """校验非负整数；用于随机种子等允许为零的参数。"""
     if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
         raise ValueError(f"{name} must be a non-negative integer")
@@ -62,7 +133,7 @@ def _nonnegative_int(value: int, *, name: str) -> int:
     return result
 
 
-def _finite_float(value: float, *, name: str) -> float:
+def _finite_float(value: Any, *, name: str) -> float:
     """校验有限实数，并返回普通 ``float``。"""
     if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):
         raise ValueError(f"{name} must be a finite number")
@@ -72,7 +143,7 @@ def _finite_float(value: float, *, name: str) -> float:
     return result
 
 
-def _positive_float(value: float, *, name: str) -> float:
+def _positive_float(value: Any, *, name: str) -> float:
     """校验大于零的有限实数。"""
     result = _finite_float(value, name=name)
     if result <= 0:
@@ -80,18 +151,29 @@ def _positive_float(value: float, *, name: str) -> float:
     return result
 
 
-def _boolean(value: bool, *, name: str) -> bool:
+def _boolean(value: Any, *, name: str) -> bool:
     """只接受 Python/NumPy 布尔值，避免字符串 ``"false"`` 被当作真。"""
     if not isinstance(value, (bool, np.bool_)):
         raise ValueError(f"{name} must be a boolean")
     return bool(value)
 
 
+def _choice(value: Any, *, name: str, choices: set[str]) -> str:
+    """Normalize and validate a public string choice."""
+    joined = ", ".join(sorted(choices))
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be one of: {joined}")
+    result = value.strip().lower().replace("-", "_").replace(" ", "_")
+    if result not in choices:
+        raise ValueError(f"{name} must be one of: {joined}")
+    return result
+
+
 def _peak_normalize(audio: np.ndarray, *, peak: float = 0.95) -> np.ndarray:
-    """把单声道有限音频的绝对峰值归一化到 ``peak``。"""
+    """把有限的单声道或 samples x channels 音频归一化到 ``peak``。"""
     if not np.isfinite(peak) or not 0 < peak <= 1:
         raise ValueError("peak must be in the interval (0, 1]")
-    result = _as_finite_array(audio, name="audio", ndim=1)
+    result = _as_finite_array(audio, name="audio", ndim=(1, 2))
     current_peak = float(np.max(np.abs(result)))
     if current_peak > 0:
         result = result * (peak / current_peak)
@@ -149,15 +231,27 @@ def normalize(data: np.ndarray) -> np.ndarray:
     return _normalize_validated(_as_finite_array(data))
 
 
-def _validate_exposure_cut(exposure_cut: int) -> int:
+def del_burst(data: np.ndarray, exposure_cut: int = 25) -> np.ndarray:
+    """Clean burst data by clipping outliers and normalizing.
+
+    Scales each column safely, divides by non-zero column means, clips to a
+    percentile range, then normalizes to [0, 1].
+
+    Args:
+        data: 2D array (time x freq).
+        exposure_cut: Percentile cut parameter.
+    """
+    warnings.warn(
+        "del_burst() is deprecated and will be removed in RadioSonify 0.3; "
+        "use preprocess() with explicit baseline, scale, and clipping settings",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    data = _as_finite_array(data, name="data", ndim=2)
     exposure_cut = _positive_int(exposure_cut, name="exposure_cut")
     if exposure_cut <= 1:
         raise ValueError("exposure_cut must be greater than 1")
-    return exposure_cut
 
-
-def _del_burst_validated(data: np.ndarray, exposure_cut: int) -> np.ndarray:
-    """清理已验证的二维数组，避免组合流水线再次全量扫描。"""
     column_scale = np.max(np.abs(data), axis=0)
     normalized_columns = np.divide(
         data,
@@ -178,48 +272,89 @@ def _del_burst_validated(data: np.ndarray, exposure_cut: int) -> np.ndarray:
     return _normalize_validated(np.clip(scaled, vmin, vmax))
 
 
-def del_burst(data: np.ndarray, exposure_cut: int = 25) -> np.ndarray:
-    """Clean burst data by clipping outliers and normalizing.
+def _rebin_axis(
+    data: np.ndarray,
+    target_bins: int,
+    *,
+    axis: int,
+    nan_aware: bool = False,
+) -> np.ndarray:
+    """沿一个轴做等宽面积平均，不丢弃首尾样本。
 
-    Scales each column safely, divides by non-zero column means, clips to a
-    percentile range, then normalizes to [0, 1].
-
-    Args:
-        data: 2D array (time x freq).
-        exposure_cut: Percentile cut parameter.
+    ``nan_aware=True`` treats NaNs as missing samples and renormalizes each
+    target bin by the valid overlap. A target bin with no valid contribution
+    remains NaN for the preprocessing mask policy to handle later.
     """
-    data = _as_finite_array(data, name="data", ndim=2)
-    return _del_burst_validated(data, _validate_exposure_cut(exposure_cut))
-
-
-def _rebin_axis(data: np.ndarray, target_bins: int, *, axis: int) -> np.ndarray:
-    """沿一个轴做等宽面积平均，不丢弃首尾样本。"""
     source_bins = data.shape[axis]
     if target_bins == source_bins:
         return data
 
     moved = np.moveaxis(data, axis, 0)
-    cumulative = np.concatenate(
-        (np.zeros((1, *moved.shape[1:]), dtype=np.float64), np.cumsum(moved, axis=0)),
-        axis=0,
-    )
+    rebinned = np.empty((target_bins, *moved.shape[1:]), dtype=np.float64)
 
-    # 把每个输入 bin 视为宽度为 1 的分段常量；在等宽目标边界上计算积分差。
+    # 把每个输入 bin 视为宽度为 1 的分段常量，在每个等宽目标区间内直接
+    # 做加权面积平均。逐目标 bin 计算只需要一个小切片；旧的全轴累计和会
+    # 对大型动态谱同时分配数个与输入等大的数组。
     edges = np.linspace(0.0, float(source_bins), target_bins + 1)
-    whole = np.floor(edges).astype(np.intp)
-    fractions = (edges - whole).reshape((-1,) + (1,) * (moved.ndim - 1))
-    partial_rows = moved[np.minimum(whole, source_bins - 1)]
-    integrals = cumulative[whole] + partial_rows * fractions
-    rebinned = np.diff(integrals, axis=0) / (source_bins / target_bins)
+    # 两个切片的长度由 ``edges`` 的构造保证相等，因此不需要 ``strict=``；
+    # 该关键字是 Python 3.10 才引入的，而本包声明支持 3.9。
+    for target_index, (left, right) in enumerate(zip(edges[:-1], edges[1:])):
+        first = int(np.floor(left))
+        stop = int(np.ceil(right))
+        source_indices = np.arange(first, stop, dtype=np.float64)
+        weights = np.minimum(source_indices + 1.0, right) - np.maximum(
+            source_indices,
+            left,
+        )
+        chunk = moved[first:stop]
+        if nan_aware:
+            valid = ~np.isnan(chunk)
+            weight_shape = (len(weights),) + (1,) * (chunk.ndim - 1)
+            expanded_weights = weights.reshape(weight_shape)
+            numerator = np.sum(
+                np.where(valid, chunk, 0.0) * expanded_weights,
+                axis=0,
+            )
+            denominator = np.sum(valid * expanded_weights, axis=0)
+            rebinned[target_index] = np.divide(
+                numerator,
+                denominator,
+                out=np.full_like(numerator, np.nan),
+                where=denominator > 0,
+            )
+        else:
+            rebinned[target_index] = np.tensordot(
+                weights,
+                chunk,
+                axes=(0, 0),
+            ) / (right - left)
     return np.moveaxis(rebinned, 0, axis)
 
 
-def _rebin_spectrogram_validated(
-    result: np.ndarray,
-    time_bins: int | None,
-    freq_bins: int | None,
+def rebin_spectrogram(
+    data: np.ndarray,
+    time_bins: int | None = None,
+    freq_bins: int | None = None,
 ) -> np.ndarray:
-    """重分箱已验证的二维数组，同时仍严格校验目标尺寸。"""
+    """按等宽面积平均把二维动态谱重分箱。
+
+    Note:
+        目标尺寸不整除原尺寸时，会按边界重叠比例分配样本。整个时间和频率范围都会
+        被使用，不再截断尾部数据。
+
+    Args:
+        data: 2D array (time x freq).
+        time_bins: Target number of time bins. None keeps original.
+        freq_bins: Target number of freq bins. None keeps original.
+    """
+    warnings.warn(
+        "rebin_spectrogram() is deprecated and will be removed in RadioSonify 0.3; "
+        "use preprocess(time_rebin=..., feature_rebin=...), which resizes in both "
+        "directions and records the effective settings in the result",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    result = _as_finite_array(data, name="data", ndim=2)
     t0, f0 = result.shape
 
     if time_bins is not None:
@@ -242,78 +377,39 @@ def _rebin_spectrogram_validated(
     return result
 
 
-def rebin_spectrogram(
-    data: np.ndarray,
-    time_bins: int | None = None,
-    freq_bins: int | None = None,
-) -> np.ndarray:
-    """按等宽面积平均把二维动态谱重分箱。
+def to_profile(data: np.ndarray) -> np.ndarray:
+    """把一维数组或二维矩阵转换为一维时间轮廓。
 
-    Note:
-        目标尺寸不整除原尺寸时，会按边界重叠比例分配样本。整个时间和频率范围都会
-        被使用，不再截断尾部数据。
-
-    Args:
-        data: 2D array (time x freq).
-        time_bins: Target number of time bins. None keeps original.
-        freq_bins: Target number of freq bins. None keeps original.
-    """
-    result = _as_finite_array(data, name="data", ndim=2)
-    return _rebin_spectrogram_validated(result, time_bins, freq_bins)
-
-
-def to_profile(
-    data: np.ndarray,
-    downsample: int | None = None,
-) -> np.ndarray:
-    """把一维数组或二维动态谱转换为一维时间轮廓。
-
-    二维输入沿频率轴求均值。``downsample`` 是近似分组因子，输出长度仍为
-    ``floor(length / downsample)``，但通过等宽面积平均使用全部输入样本。
+    二维输入沿特征轴求均值。时间轴的重分箱属于统一预处理的 ``time_rebin``，
+    不再在这里做。
     """
     data = _as_finite_array(data, name="data", ndim=(1, 2))
     if data.ndim == 2:
         data = np.mean(data, axis=1)
-
-    if downsample is not None:
-        downsample = _positive_int(downsample, name="downsample")
-        if downsample > len(data):
-            raise ValueError(
-                f"downsample ({downsample}) cannot exceed profile length ({len(data)})"
-            )
-        if downsample > 1:
-            target_bins = len(data) // downsample
-            data = _rebin_axis(data, target_bins, axis=0)
-
     return data
 
 
-def _interpolate_repeated_profile(
-    profile: np.ndarray,
-    *,
-    repeat: int,
-    n_samples: int,
-) -> np.ndarray:
-    """把轮廓插值到指定采样数，不创建巨型 ``tile`` 中间数组。
+def _interpolate_cyclic_profile(profile: np.ndarray, *, n_samples: int) -> np.ndarray:
+    """把轮廓循环插值到指定采样数。
 
     轮廓是分箱积分数据：``N`` 个 bin 覆盖 ``N`` 个等宽区间，因此最后一个 bin
-    之后接回第一个 bin。这同时让 ``repeat`` 次拼接在接缝处保持连续 —— 实测硬
-    拼接会把真实折叠轮廓 4 kHz 以上的能量抬高约 6.5 倍，即可听的咔哒声。
+    之后接回第一个 bin。这让预处理阶段做的 ``repeat`` 次拼接在每个接缝处都保持
+    连续 —— 实测硬拼接会把真实折叠轮廓 4 kHz 以上的能量抬高约 6.5 倍，
+    即可听的咔哒声。
     """
     profile = _as_finite_array(profile, name="profile", ndim=1)
-    repeat = _positive_int(repeat, name="repeat")
     n_samples = _positive_int(n_samples, name="n_samples")
 
-    total_points = len(profile) * repeat
+    total_points = len(profile)
     if total_points > 2**53:
-        raise ValueError("repeat is too large for exact float64 profile interpolation")
+        raise ValueError("profile is too long for exact float64 interpolation")
 
     positions = np.arange(n_samples, dtype=np.float64) * (total_points / n_samples)
     left = np.floor(positions).astype(np.int64)
     fraction = positions - left
     return (
-        profile[left % len(profile)] * (1.0 - fraction)
-        + profile[(left + 1) % len(profile)] * fraction
+        profile[left % total_points] * (1.0 - fraction)
+        + profile[(left + 1) % total_points] * fraction
     )
 
 
@@ -330,6 +426,16 @@ def _wav_output_path(path: str | Path) -> Path:
         raise ValueError("path must name a file with the .wav extension")
     if output_path.exists() and not output_path.is_file():
         raise ValueError(f"path points to a directory, not a WAV file: {output_path}")
+    if output_path.is_symlink() and not output_path.exists():
+        raise ValueError(f"path points to a broken symbolic link: {output_path}")
+
+    # Fail before synthesis when an existing parent component is a file. The
+    # remaining missing directories are safe for save_audio() to create later.
+    existing_parent = output_path.parent
+    while not existing_parent.exists() and existing_parent.parent != existing_parent:
+        existing_parent = existing_parent.parent
+    if existing_parent.exists() and not existing_parent.is_dir():
+        raise ValueError(f"WAV output parent is not a directory: {existing_parent}")
     return output_path
 
 

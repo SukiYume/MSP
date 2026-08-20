@@ -39,39 +39,31 @@ class TestGriffinLim:
 
         monkeypatch.setattr(core_module.np, "isfinite", tracked_isfinite)
         prepared = griffinlim_module._prepare_spectrogram(
-            np.arange(256, dtype=np.float64).reshape(16, 16),
+            np.arange(256, dtype=np.float64).reshape(16, 16) / 255,
             n_fft=32,
-            time_rebin=8,
-            freq_rebin=16,
-            clean=True,
-            exposure_cut=25,
         )
 
-        assert prepared.shape == (8, 16)
+        assert prepared.shape == (16, 16)
         assert calls == [(16, 16)]
 
     def test_returns_tuple(self):
         rng = np.random.default_rng(42)
-        spec = rng.random((256, 1024))
+        spec = rng.random((LEGACY_GRIFFIN_TIME_BINS, LEGACY_GRIFFIN_FREQ_BINS))
         audio, sr = griffinlim(
             spec,
             sr=48000,
             n_iter=10,
-            time_rebin=LEGACY_GRIFFIN_TIME_BINS,
-            freq_rebin=LEGACY_GRIFFIN_FREQ_BINS,
         )
         assert isinstance(audio, np.ndarray)
         assert sr == 48000
 
     def test_output_is_1d(self):
         rng = np.random.default_rng(42)
-        spec = rng.random((256, 1024))
+        spec = rng.random((LEGACY_GRIFFIN_TIME_BINS, LEGACY_GRIFFIN_FREQ_BINS))
         audio, sr = griffinlim(
             spec,
             sr=48000,
             n_iter=10,
-            time_rebin=LEGACY_GRIFFIN_TIME_BINS,
-            freq_rebin=LEGACY_GRIFFIN_FREQ_BINS,
         )
         assert audio.ndim == 1
         assert np.all(np.isfinite(audio))
@@ -84,26 +76,22 @@ class TestGriffinLim:
 
     def test_auto_rebin_freq(self):
         rng = np.random.default_rng(42)
-        spec = rng.random((256, 1024))
+        spec = rng.random((LEGACY_GRIFFIN_TIME_BINS, LEGACY_GRIFFIN_FREQ_BINS))
         audio, sr = griffinlim(
             spec,
             sr=48000,
             n_iter=10,
-            time_rebin=LEGACY_GRIFFIN_TIME_BINS,
-            freq_rebin=LEGACY_GRIFFIN_FREQ_BINS,
         )
         assert audio.ndim == 1
 
     def test_saves_to_file(self, tmp_path):
         rng = np.random.default_rng(42)
-        spec = rng.random((256, 1024))
+        spec = rng.random((LEGACY_GRIFFIN_TIME_BINS, LEGACY_GRIFFIN_FREQ_BINS))
         out = tmp_path / "out.wav"
         audio, sr = griffinlim(
             spec,
             sr=48000,
             n_iter=10,
-            time_rebin=LEGACY_GRIFFIN_TIME_BINS,
-            freq_rebin=LEGACY_GRIFFIN_FREQ_BINS,
             output=str(out),
         )
         assert out.exists()
@@ -117,40 +105,34 @@ class TestGriffinLim:
             ({"max_db": 10, "ref_db": 20}, "ref_db"),
             ({"n_fft": 64, "frame_length": 0.04}, "longer than n_fft"),
             ({"frame_length": "0.04"}, "frame_length"),
-            ({"freq_rebin": "16"}, "freq_rebin"),
-            ({"clean": "no"}, "clean"),
-            ({"clean": False, "exposure_cut": 1}, "exposure_cut"),
         ],
     )
     def test_rejects_invalid_parameters(self, kwargs, message):
-        call_kwargs = {"freq_rebin": 16} | kwargs
         with pytest.raises(ValueError, match=message):
-            griffinlim(np.ones((16, 16)), **call_kwargs)
+            griffinlim(np.ones((16, 16)), **kwargs)
 
     def test_rejects_non_finite_input(self):
         data = np.ones((16, 16))
         data[0, 0] = np.nan
         with pytest.raises(ValueError, match="finite"):
-            griffinlim(data, freq_rebin=16)
+            griffinlim(data)
 
-    def test_n_mels_is_a_deprecated_alias_and_cannot_overlap_freq_rebin(self):
-        data = np.arange(128, dtype=np.float64).reshape(16, 8)
-        kwargs = {
-            "sr": 100,
-            "n_iter": 1,
-            "n_fft": 16,
-            "frame_length": 0.08,
-            "preemphasis": 0,
-        }
+    def test_rebinning_knobs_left_the_method_signature(self):
+        """时间/频率重分箱只属于统一预处理，方法层不再接受这些参数。"""
+        parameters = inspect.signature(griffinlim).parameters
 
-        with pytest.warns(DeprecationWarning, match="freq_rebin"):
-            aliased, _ = griffinlim(data, n_mels=8, **kwargs)
-        direct, _ = griffinlim(data, freq_rebin=8, **kwargs)
+        assert "time_rebin" not in parameters
+        assert "freq_rebin" not in parameters
+        assert "n_mels" not in parameters
 
-        np.testing.assert_allclose(aliased, direct)
-        with pytest.warns(DeprecationWarning):
-            with pytest.raises(ValueError, match="cannot be supplied together"):
-                griffinlim(data, n_mels=8, freq_rebin=8, **kwargs)
+    def test_frame_geometry_matches_the_synthesis_hop(self):
+        """注册表用它把目标时长换算成输入帧数，必须与实际合成的跳距一致。"""
+        sample_rate, hop_length = griffinlim_module._frame_geometry(
+            {"sr": 48_000, "frame_length": 0.04}
+        )
+
+        assert sample_rate == 48_000
+        assert hop_length == int(48_000 * 0.04) // 4
 
     def test_keeps_quiet_edges_that_encode_event_time(self, monkeypatch):
         native = np.zeros(40, dtype=np.float64)
@@ -162,15 +144,18 @@ class TestGriffinLim:
         )
 
         audio, _ = griffinlim(
-            np.arange(64, dtype=np.float64).reshape(8, 8),
+            np.arange(64, dtype=np.float64).reshape(8, 8) / 63,
             sr=100,
             n_iter=1,
             n_fft=16,
             frame_length=0.08,
             preemphasis=0,
-            freq_rebin=8,
         )
 
         assert len(audio) == len(native)
         assert np.all(audio[:12] == 0)
         assert np.all(audio[18:] == 0)
+
+    def test_rejects_data_that_skipped_shared_preprocessing(self):
+        with pytest.raises(ValueError, match="preprocess"):
+            griffinlim(np.arange(16.0).reshape(4, 4))

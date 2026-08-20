@@ -1,4 +1,4 @@
-"""Run the unified API on a bundled dynamic-spectrum example.
+"""Run the unified API on a bundled two-dimensional-array example.
 
 The downloaded array contains no time-coordinate metadata, so the listening
 duration below is an explicit example calibration rather than an inferred
@@ -25,8 +25,7 @@ def sonify_example(output: str | Path = DEFAULT_OUTPUT) -> rs.SonificationResult
     )
     return rs.sonify(
         source,
-        method="amplitude",
-        method_params={"freq": 880},
+        method="auto",
         output=output,
     )
 

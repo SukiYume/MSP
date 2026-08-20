@@ -1,4 +1,4 @@
-"""RadioSonify：把射电轮廓和动态谱转换为时长可控的音频。
+"""RadioSonify：把一维轮廓和多维数值数组转换为时长可控的音频。
 
 推荐从 :func:`sonify` 和 :class:`SonificationInput` 开始；底层方法继续保留，
 用于需要方法原生时长或复现旧结果的场景。
@@ -7,8 +7,6 @@
 from __future__ import annotations
 
 import importlib
-import sys
-from types import ModuleType
 
 __version__ = "0.2.0"
 
@@ -22,6 +20,7 @@ from .core import (
     to_profile,
 )
 from .inputs import DataType, SonificationInput, infer_data_type
+from .preprocessing import preprocess, preprocessing_defaults
 from .registry import (
     MethodSpec,
     PostprocessorSpec,
@@ -31,6 +30,7 @@ from .registry import (
 )
 from .timing import (
     condition_audio_output,
+    duration_to_frames,
     duration_to_samples,
     fit_audio_duration,
     target_audio_duration,
@@ -38,10 +38,15 @@ from .timing import (
 
 _LAZY_EXPORTS = {
     "profile_to_wave": (".profile", "profile_to_wave"),
-    "griffinlim": (".griffinlim", "griffinlim"),
-    "hifigan": (".hifigan", "hifigan"),
+    "erb_sonify": (".erb", "erb_sonify"),
+    "erb_frequencies": (".erb", "erb_frequencies"),
+    "mel_frequencies": (".erb", "mel_frequencies"),
+    "griffinlim_reconstruct": (".griffinlim", "griffinlim"),
+    "hifigan_vocode": (".hifigan", "hifigan"),
     "load_example": (".hub", "load_example"),
-    "musicnet": (".musicnet", "musicnet"),
+    "musicnet_transform": (".musicnet", "musicnet"),
+    "rave_transform": (".rave", "rave"),
+    "spatial_sonify": (".spatial", "spatial_sonify"),
     "STYLE_NAMES": (".musicnet", "STYLE_NAMES"),
 }
 
@@ -61,21 +66,6 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | set(_LAZY_EXPORTS))
 
 
-class _RadioSonifyModule(ModuleType):
-    """保持与子模块同名的惰性函数仍表现为包级函数。"""
-
-    def __getattribute__(self, name: str):
-        lazy_exports = ModuleType.__getattribute__(self, "_LAZY_EXPORTS")
-        namespace = ModuleType.__getattribute__(self, "__dict__")
-        if name in lazy_exports and isinstance(namespace.get(name), ModuleType):
-            namespace.pop(name)
-            return __getattr__(name)
-        return ModuleType.__getattribute__(self, name)
-
-
-sys.modules[__name__].__class__ = _RadioSonifyModule
-
-
 __all__ = [
     "__version__",
     "DataType",
@@ -89,9 +79,12 @@ __all__ = [
     "default_method",
     "infer_data_type",
     "target_audio_duration",
+    "duration_to_frames",
     "duration_to_samples",
     "fit_audio_duration",
     "condition_audio_output",
+    "preprocess",
+    "preprocessing_defaults",
     "normalize",
     "del_burst",
     "rebin_spectrogram",
@@ -100,8 +93,13 @@ __all__ = [
     "load_example",
     "profile_to_wave",
     "amplitude_modulate",
-    "griffinlim",
-    "hifigan",
-    "musicnet",
+    "erb_sonify",
+    "erb_frequencies",
+    "mel_frequencies",
+    "griffinlim_reconstruct",
+    "hifigan_vocode",
+    "musicnet_transform",
+    "rave_transform",
+    "spatial_sonify",
     "STYLE_NAMES",
 ]

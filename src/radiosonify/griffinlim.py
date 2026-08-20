@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from pathlib import Path
 
 import librosa
@@ -10,23 +9,16 @@ import numpy as np
 from scipy import signal as scipy_signal
 
 from .core import (
-    _as_finite_array,
-    _boolean,
-    _del_burst_validated,
     _finite_float,
-    _normalize_validated,
     _peak_normalize,
     _positive_float,
     _positive_int,
-    _rebin_spectrogram_validated,
-    _validate_exposure_cut,
     _wav_output_path,
     save_audio,
 )
+from .preprocessing import _as_normalized_array
 
 # ---------- 频谱变换内部步骤 ----------
-
-_DEFAULT_FREQ_BINS = 512
 
 
 def _mel_to_linear_matrix(sr: int, n_fft: int, n_mels: int) -> np.ndarray:
@@ -109,9 +101,7 @@ def _validate_synthesis_settings(
         raise ValueError("frame_length and sr must produce at least two samples")
     if win_length > n_fft:
         raise ValueError("frame_length and sr produce a window longer than n_fft")
-    hop_length = win_length // 4
-    if hop_length < 1:
-        raise ValueError("frame_length and sr produce a zero hop length")
+    hop_length = _hop_length(sr, frame_length)
 
     return (
         sr,
@@ -125,75 +115,62 @@ def _validate_synthesis_settings(
     )
 
 
-def _resolve_frequency_bins(n_mels: int | None, freq_rebin: int | None) -> int | None:
-    """把旧 ``n_mels`` 关键字迁移到唯一的频率分箱控制量。"""
-    if n_mels is not None:
-        warnings.warn(
-            "n_mels is deprecated; use freq_rebin instead",
-            DeprecationWarning,
-            stacklevel=3,
-        )
-        if freq_rebin is not None:
-            raise ValueError("n_mels and freq_rebin cannot be supplied together; use freq_rebin")
-        return _positive_int(n_mels, name="n_mels")
-    if freq_rebin is None:
-        return None
-    return _positive_int(freq_rebin, name="freq_rebin")
+def _hop_length(sr: int, frame_length: float) -> int:
+    """Griffin--Lim 的跳距完全由采样率和帧长决定。"""
+    return max(1, int(sr * frame_length) // 4)
 
 
-def _prepare_spectrogram(
-    spectrogram: np.ndarray,
-    *,
-    n_fft: int,
-    time_rebin: int | None,
-    freq_rebin: int | None,
-    clean: bool,
-    exposure_cut: int,
-) -> np.ndarray:
-    """校验、清理、归一化并重分箱动态谱。"""
-    data = _as_finite_array(spectrogram, name="spectrogram", ndim=2)
-    clean = _boolean(clean, name="clean")
-    exposure_cut = _validate_exposure_cut(exposure_cut)
+def _frame_geometry(method_params: dict) -> tuple[int, int]:
+    """注册表回调：由方法参数得出 ``(sample_rate, hop_length)``。
 
-    target_freq = min(_DEFAULT_FREQ_BINS, data.shape[1]) if freq_rebin is None else freq_rebin
-    if target_freq > n_fft // 2 + 1:
+    统一 API 用它把目标音频时长换算成输入帧数，从而让预处理直接把时间轴调到
+    正确长度。否则只能先合成再重采样：实测 ``speed=0.5`` 会产生 6.3 倍的多相
+    拉伸，音高整体下移、带宽塌陷。
+    """
+    sr = _positive_int(method_params["sr"], name="sr")
+    frame_length = _positive_float(method_params["frame_length"], name="frame_length")
+    return sr, _hop_length(sr, frame_length)
+
+
+def _feature_geometry(method_params: dict) -> tuple[int, int]:
+    """注册表回调：返回默认频率格数和当前 FFT 允许的上限。"""
+    n_fft = _positive_int(method_params["n_fft"], name="n_fft")
+    max_bins = n_fft // 2 + 1
+    return min(512, max_bins), max_bins
+
+
+def _prepare_spectrogram(spectrogram: np.ndarray, *, n_fft: int) -> np.ndarray:
+    """校验统一预处理后的动态谱。尺寸适配已由预处理完成。"""
+    data = _as_normalized_array(spectrogram, name="spectrogram", ndim=2)
+    if data.shape[1] > n_fft // 2 + 1:
         raise ValueError("frequency bins cannot exceed n_fft // 2 + 1")
-
-    if clean:
-        data = _del_burst_validated(data, exposure_cut)
-    else:
-        # 望远镜强度通常不是 [0, 1]；不先归一化会在 dB 映射时整体饱和。
-        data = _normalize_validated(data)
-    return _rebin_spectrogram_validated(data, time_rebin, target_freq)
+    return data
 
 
 def griffinlim(
     spectrogram: np.ndarray,
     sr: int = 48000,
     n_iter: int = 64,
-    n_mels: int | None = None,
     n_fft: int = 4096,
     frame_length: float = 0.04,
     preemphasis: float = 0.0,
     max_db: float = 100.0,
     ref_db: float = 20.0,
-    time_rebin: int | None = None,
-    freq_rebin: int | None = None,
-    clean: bool = False,
-    exposure_cut: int = 25,
     output: str | Path | None = None,
 ) -> tuple[np.ndarray, int]:
     """使用 Griffin–Lim 从动态谱重建音频。
 
     Treats the input 2D array as a mel-spectrogram and reconstructs
-    audio by iteratively estimating phase information.
+    audio by iteratively estimating phase information. Time and frequency
+    rebinning belong to :func:`radiosonify.preprocess`; the registered
+    parameter-aware feature geometry and ``time_rebin='auto'`` make the unified
+    API size the input so synthesis already matches the requested duration.
 
     Args:
-        spectrogram: 2D array (time x freq).
+        spectrogram: Preprocessed ``[0, 1]`` 2D array (time x feature).
         sr: Sample rate in Hz.
         n_iter: Number of Griffin-Lim iterations. The default 64 balances
             convergence against the mel-to-linear approximation's error floor.
-        n_mels: Deprecated alias for ``freq_rebin``.
         n_fft: FFT size.
         frame_length: Frame length in seconds.
         preemphasis: Optional de-emphasis coefficient used only for deliberate
@@ -201,10 +178,6 @@ def griffinlim(
             paired pre-emphasis stage.
         max_db: Maximum dB for denormalization.
         ref_db: Reference dB for denormalization.
-        time_rebin: Rebin time axis. None = auto.
-        freq_rebin: Target frequency-bin count. None = keep at most 512 bins.
-        clean: Apply del_burst cleaning first.
-        exposure_cut: Exposure cut for del_burst.
         output: Path to save WAV file. None = don't save.
 
     Returns:
@@ -229,15 +202,7 @@ def griffinlim(
         max_db=max_db,
         ref_db=ref_db,
     )
-    resolved_freq_rebin = _resolve_frequency_bins(n_mels, freq_rebin)
-    data = _prepare_spectrogram(
-        spectrogram,
-        n_fft=n_fft,
-        time_rebin=time_rebin,
-        freq_rebin=resolved_freq_rebin,
-        clean=clean,
-        exposure_cut=exposure_cut,
-    )
+    data = _prepare_spectrogram(spectrogram, n_fft=n_fft)
 
     if float(np.ptp(data)) == 0:
         silent_samples = max(1, hop_length * max(data.shape[0] - 1, 1))

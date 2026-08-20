@@ -4,7 +4,9 @@ import numpy as np
 import pytest
 
 from radiosonify.core import (
-    _interpolate_repeated_profile,
+    _immutable_array,
+    _interpolate_cyclic_profile,
+    _merge_settings,
     del_burst,
     normalize,
     rebin_spectrogram,
@@ -16,33 +18,24 @@ from radiosonify.core import (
 
 def test_profile_bins_span_full_intervals_and_wrap_at_the_seam():
     """N 个 bin 覆盖 N 个等宽区间（分箱积分语义），末端接回第一个 bin。"""
-    result = _interpolate_repeated_profile(
-        np.array([0.0, 1.0, 4.0]),
-        repeat=1,
-        n_samples=5,
-    )
+    result = _interpolate_cyclic_profile(np.array([0.0, 1.0, 4.0]), n_samples=5)
 
     # 最后一个样本从 bin 2 插值回 bin 0，而不是停在 bin 2 上。
     np.testing.assert_allclose(result, [0.0, 0.6, 1.6, 3.4, 2.4])
 
 
-def test_repeated_profile_tiles_without_a_seam_discontinuity():
-    result = _interpolate_repeated_profile(
-        np.array([0.0, 1.0, 4.0]),
-        repeat=2,
-        n_samples=6,
-    )
+def test_preprocessing_repeat_matches_the_removed_method_level_repeat():
+    """repeat 上移到预处理后，结果必须与旧的方法内 repeat 逐样本一致。
 
-    np.testing.assert_allclose(result, [0.0, 1.0, 4.0, 0.0, 1.0, 4.0])
+    旧实现把 ``repeat`` 折进插值索引；新实现在预处理末尾沿时间轴 tile，然后
+    以 repeat=1 循环插值。两者在数学上恒等，这条测试守住这个等价关系。
+    """
+    profile = np.array([0.0, 1.0, 4.0])
+    tiled = np.tile(profile, 3)
 
+    result = _interpolate_cyclic_profile(tiled, n_samples=9)
 
-def test_profile_interpolation_rejects_indices_beyond_float64_exact_range():
-    with pytest.raises(ValueError, match="exact float64"):
-        _interpolate_repeated_profile(
-            np.array([0.0, 1.0]),
-            repeat=2**52 + 1,
-            n_samples=1,
-        )
+    np.testing.assert_allclose(result, [0.0, 1.0, 4.0, 0.0, 1.0, 4.0, 0.0, 1.0, 4.0])
 
 
 def test_require_reports_broken_optional_binary(monkeypatch):
@@ -91,7 +84,12 @@ class TestNormalize:
             normalize(np.array([1 + 2j, 3 + 4j]))
 
 
+@pytest.mark.filterwarnings("ignore:del_burst.*:DeprecationWarning")
 class TestDelBurst:
+    def test_public_helper_is_explicitly_deprecated(self):
+        with pytest.warns(DeprecationWarning, match="preprocess"):
+            del_burst(np.ones((4, 4)))
+
     def test_output_range(self):
         rng = np.random.default_rng(42)
         data = rng.random((100, 50)) * 100 + 1
@@ -136,7 +134,12 @@ class TestDelBurst:
         assert np.all(np.isfinite(result))
 
 
+@pytest.mark.filterwarnings("ignore:rebin_spectrogram.*:DeprecationWarning")
 class TestRebinSpectrogram:
+    def test_public_helper_is_explicitly_deprecated(self):
+        with pytest.warns(DeprecationWarning, match="preprocess"):
+            rebin_spectrogram(np.ones((4, 4)), time_bins=2)
+
     def test_downsample_both_axes(self):
         data = np.ones((100, 200))
         result = rebin_spectrogram(data, time_bins=50, freq_bins=100)
@@ -200,21 +203,13 @@ class TestToProfile:
         assert result.ndim == 1
         assert len(result) == 100
 
-    def test_downsample(self):
-        data = np.ones(100)
-        result = to_profile(data, downsample=10)
-        assert len(result) == 10
+    def test_feature_axis_is_averaged_without_weighting(self):
+        data = np.tile(np.array([0.0, 2.0, 4.0]), (5, 1))
+        np.testing.assert_allclose(to_profile(data), np.full(5, 2.0))
 
-    def test_non_divisible_downsample_keeps_the_tail(self):
-        result = to_profile(np.arange(5, dtype=np.float64), downsample=2)
-        np.testing.assert_allclose(result, [0.8, 3.2])
-        assert float(np.mean(result)) == pytest.approx(2.0)
-
-    def test_rejects_empty_and_oversized_downsample(self):
+    def test_rejects_empty(self):
         with pytest.raises(ValueError, match="empty"):
             to_profile(np.array([]))
-        with pytest.raises(ValueError, match="cannot exceed"):
-            to_profile(np.ones(4), downsample=5)
 
 
 class TestSaveAudio:
@@ -233,6 +228,17 @@ class TestSaveAudio:
         save_audio(np.zeros(16, dtype=np.float32), 48000, path)
         assert path.exists()
 
+    def test_writes_samples_by_channels_stereo(self, tmp_path):
+        import soundfile as sf
+
+        path = tmp_path / "stereo.wav"
+        stereo = np.column_stack((np.linspace(-0.5, 0.5, 32), np.linspace(0.5, -0.5, 32)))
+        save_audio(stereo, 8_000, path)
+
+        data, sr = sf.read(path, always_2d=True)
+        assert data.shape == (32, 2)
+        assert sr == 8_000
+
     def test_rejects_clipping(self, tmp_path):
         with pytest.raises(ValueError, match="clipping"):
             save_audio(np.array([0.0, 1.1]), 48000, tmp_path / "bad.wav")
@@ -241,3 +247,58 @@ class TestSaveAudio:
         with pytest.raises(ValueError, match=r"\.wav"):
             save_audio(np.zeros(16), 48000, tmp_path / "bad.flac")
         assert not (tmp_path / "bad.flac").exists()
+
+
+class TestImmutableArray:
+    def test_strided_input_is_copied_exactly_once_and_stays_frozen(self):
+        source = np.arange(24.0).reshape(2, 3, 4)
+        transposed = np.transpose(source, (1, 2, 0))
+
+        frozen = _immutable_array(transposed, dtype=np.float64)
+
+        np.testing.assert_array_equal(frozen, transposed)
+        assert frozen.flags.writeable is False
+        # ``tobytes`` serializes the strided view directly, so the snapshot is
+        # backed by an immutable bytes object without a separate contiguity pass.
+        root = frozen
+        while isinstance(root, np.ndarray):
+            root = root.base
+        assert isinstance(root, bytes)
+        with pytest.raises(ValueError, match="WRITEABLE"):
+            frozen.setflags(write=True)
+
+        source[0, 0, 0] = 999.0
+        assert frozen[0, 0, 0] == 0.0
+
+    def test_object_arrays_are_rejected(self):
+        with pytest.raises(TypeError, match="object arrays"):
+            _immutable_array(np.array([object()], dtype=object))
+
+
+class TestMergeSettings:
+    defaults = {"alpha": 1, "beta": 2}
+
+    def test_none_and_partial_mappings_fall_back_to_defaults(self):
+        assert _merge_settings(self.defaults, None, field_name="f", unknown_label="u") == {
+            "alpha": 1,
+            "beta": 2,
+        }
+        assert _merge_settings(self.defaults, {"beta": 9}, field_name="f", unknown_label="u") == {
+            "alpha": 1,
+            "beta": 9,
+        }
+
+    def test_container_key_type_and_unknown_keys_are_reported_uniformly(self):
+        with pytest.raises(ValueError, match="settings must be a mapping or None"):
+            _merge_settings(self.defaults, [("alpha", 1)], field_name="settings", unknown_label="u")
+        with pytest.raises(ValueError, match="settings keys must be strings"):
+            _merge_settings(self.defaults, {1: "x"}, field_name="settings", unknown_label="u")
+        with pytest.raises(ValueError, match="bad key: gamma; allowed: alpha, beta"):
+            _merge_settings(
+                self.defaults, {"gamma": 1}, field_name="settings", unknown_label="bad key"
+            )
+
+    def test_supplied_mapping_is_left_unchanged(self):
+        supplied = {"beta": 9}
+        _merge_settings(self.defaults, supplied, field_name="f", unknown_label="u")
+        assert supplied == {"beta": 9}

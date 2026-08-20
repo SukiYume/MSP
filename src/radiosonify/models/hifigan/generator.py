@@ -4,20 +4,35 @@
 Adapted from https://github.com/jik876/hifi-gan (MIT License).
 """
 
+import importlib
+from types import ModuleType
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import Conv1d, ConvTranspose1d
 
+_parametrizations: ModuleType | None
+_parametrize: ModuleType | None
 try:
-    # PyTorch >= 2.0: use the non-deprecated parametrizations API
-    from torch.nn.utils.parametrizations import weight_norm
-    from torch.nn.utils.parametrize import remove_parametrizations as _remove_param
-
-    def remove_weight_norm(module: nn.Module) -> nn.Module:
-        return _remove_param(module, "weight")
+    # PyTorch >= 2.0: use the non-deprecated parametrizations API.
+    _parametrizations = importlib.import_module("torch.nn.utils.parametrizations")
+    _parametrize = importlib.import_module("torch.nn.utils.parametrize")
 except ImportError:
-    from torch.nn.utils import remove_weight_norm, weight_norm  # type: ignore[assignment]
+    _parametrizations = None
+    _parametrize = None
+
+
+def _apply_weight_norm(module: nn.Module) -> nn.Module:
+    if _parametrizations is not None:
+        return _parametrizations.weight_norm(module)
+    return torch.nn.utils.weight_norm(module)
+
+
+def _remove_weight_norm(module: nn.Module) -> nn.Module:
+    if _parametrize is not None:
+        return _parametrize.remove_parametrizations(module, "weight")
+    return torch.nn.utils.remove_weight_norm(module)
 
 LRELU_SLOPE = 0.1
 
@@ -27,23 +42,22 @@ def get_padding(kernel_size, dilation=1):
 
 
 class ResBlock1(torch.nn.Module):
-    def __init__(self, h, channels, kernel_size=3, dilation=(1, 3, 5)):
+    def __init__(self, _h, channels, kernel_size=3, dilation=(1, 3, 5)):
         super().__init__()
-        self.h = h
         self.convs1 = nn.ModuleList([
-            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+            _apply_weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
                                padding=get_padding(kernel_size, dilation[0]))),
-            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+            _apply_weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
                                padding=get_padding(kernel_size, dilation[1]))),
-            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[2],
+            _apply_weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[2],
                                padding=get_padding(kernel_size, dilation[2])))
         ])
         self.convs2 = nn.ModuleList([
-            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
+            _apply_weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
                                padding=get_padding(kernel_size, 1))),
-            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
+            _apply_weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
                                padding=get_padding(kernel_size, 1))),
-            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
+            _apply_weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
                                padding=get_padding(kernel_size, 1)))
         ])
 
@@ -58,19 +72,18 @@ class ResBlock1(torch.nn.Module):
 
     def remove_weight_norm(self):
         for conv in self.convs1:
-            remove_weight_norm(conv)
+            _remove_weight_norm(conv)
         for conv in self.convs2:
-            remove_weight_norm(conv)
+            _remove_weight_norm(conv)
 
 
 class ResBlock2(torch.nn.Module):
-    def __init__(self, h, channels, kernel_size=3, dilation=(1, 3)):
+    def __init__(self, _h, channels, kernel_size=3, dilation=(1, 3)):
         super().__init__()
-        self.h = h
         self.convs = nn.ModuleList([
-            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+            _apply_weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
                                padding=get_padding(kernel_size, dilation[0]))),
-            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+            _apply_weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
                                padding=get_padding(kernel_size, dilation[1])))
         ])
 
@@ -83,22 +96,21 @@ class ResBlock2(torch.nn.Module):
 
     def remove_weight_norm(self):
         for conv in self.convs:
-            remove_weight_norm(conv)
+            _remove_weight_norm(conv)
 
 
 class Generator(torch.nn.Module):
     def __init__(self, h):
         super().__init__()
-        self.h = h
         self.num_kernels = len(h.resblock_kernel_sizes)
         self.num_upsamples = len(h.upsample_rates)
         final_channels = h.upsample_initial_channel // (2 ** self.num_upsamples)
-        self.conv_pre = weight_norm(Conv1d(80, h.upsample_initial_channel, 7, 1, padding=3))
+        self.conv_pre = _apply_weight_norm(Conv1d(80, h.upsample_initial_channel, 7, 1, padding=3))
         resblock = ResBlock1 if h.resblock == '1' else ResBlock2
 
         self.ups = nn.ModuleList()
         for i, (u, k) in enumerate(zip(h.upsample_rates, h.upsample_kernel_sizes)):
-            self.ups.append(weight_norm(
+            self.ups.append(_apply_weight_norm(
                 ConvTranspose1d(h.upsample_initial_channel // (2 ** i),
                                 h.upsample_initial_channel // (2 ** (i + 1)),
                                 k, u, padding=(k - u) // 2)))
@@ -109,7 +121,7 @@ class Generator(torch.nn.Module):
             for k, d in zip(h.resblock_kernel_sizes, h.resblock_dilation_sizes):
                 self.resblocks.append(resblock(h, ch, k, d))
 
-        self.conv_post = weight_norm(Conv1d(final_channels, 1, 7, 1, padding=3))
+        self.conv_post = _apply_weight_norm(Conv1d(final_channels, 1, 7, 1, padding=3))
 
     def forward(self, x):
         x = self.conv_pre(x)
@@ -130,8 +142,8 @@ class Generator(torch.nn.Module):
 
     def remove_weight_norm(self):
         for layer in self.ups:
-            remove_weight_norm(layer)
+            _remove_weight_norm(layer)
         for layer in self.resblocks:
             layer.remove_weight_norm()
-        remove_weight_norm(self.conv_pre)
-        remove_weight_norm(self.conv_post)
+        _remove_weight_norm(self.conv_pre)
+        _remove_weight_norm(self.conv_post)

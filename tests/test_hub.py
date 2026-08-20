@@ -1,12 +1,16 @@
 import wave
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 from huggingface_hub.utils import LocalEntryNotFoundError
 
 from radiosonify.hub import (
     REVISION,
+    _write_pcm16_atomic,
     get_data_path,
     get_instrument_path,
     get_model_path,
@@ -71,6 +75,21 @@ class TestGetModelPath:
 
 
 class TestGetInstrumentPath:
+    def test_atomic_writer_uses_unique_temporary_files_across_threads(self, tmp_path):
+        destination = tmp_path / "violin.wav"
+        audio = np.sin(np.linspace(0, 4 * np.pi, 4_800)).astype(np.float32)
+        barrier = Barrier(8)
+
+        def write_once(_index):
+            barrier.wait()
+            _write_pcm16_atomic(destination, audio)
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(write_once, range(8)))
+
+        assert destination.is_file()
+        assert not list(tmp_path.glob(".violin.wav.*.tmp"))
+
     @patch("radiosonify.hub.hf_hub_download")
     def test_violin_is_generated_locally_without_a_download(
         self, mock_download, monkeypatch, tmp_path
@@ -120,3 +139,16 @@ class TestLoadExample:
     def test_unknown_name_raises(self):
         with pytest.raises(ValueError, match="Unknown"):
             load_example("nonexistent")
+
+
+def test_cache_directory_follows_a_later_environment_change(monkeypatch, tmp_path):
+    from radiosonify import hub
+
+    monkeypatch.delenv("RADIOSONIFY_CACHE_DIR", raising=False)
+    assert hub._cache_dir() == hub.CACHE_DIR
+
+    # The variable is read on every call, so a process that configures it after
+    # importing the package still redirects downloads and generated instruments.
+    monkeypatch.setenv("RADIOSONIFY_CACHE_DIR", str(tmp_path))
+    assert hub._cache_dir() == str(tmp_path)
+    assert Path(hub.get_instrument_path("violin")).is_relative_to(tmp_path)
