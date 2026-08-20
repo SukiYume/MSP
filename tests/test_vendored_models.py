@@ -104,6 +104,21 @@ def test_hifigan_generator_uses_explicit_final_channels_without_extra_reinitiali
     assert "Conv1d(final_channels, 1" in source
 
 
+def test_hifigan_generator_postpones_pep604_annotations_for_python39():
+    source = (HIFIGAN_MODELS / "generator.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    assert any(
+        isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr) for node in ast.walk(tree)
+    )
+    assert any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "__future__"
+        and any(alias.name == "annotations" for alias in node.names)
+        for node in tree.body
+    )
+
+
 def _definitions_for_path(path):
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return {

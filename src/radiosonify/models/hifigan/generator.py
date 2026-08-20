@@ -4,6 +4,8 @@
 Adapted from https://github.com/jik876/hifi-gan (MIT License).
 """
 
+from __future__ import annotations
+
 import importlib
 from types import ModuleType
 

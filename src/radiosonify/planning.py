@@ -134,7 +134,16 @@ def _resolve_feature_rebin(
             f"feature_rebin='auto' requires feature geometry, which method '{spec.name}' "
             "does not register"
         )
-    return cast(int | None, requested)
+    return _optional_rebin_count(requested, name="feature_rebin")
+
+
+def _optional_rebin_count(requested: int | str | None, *, name: str) -> int | None:
+    """Narrow a validated rebin setting without evaluating a runtime union type."""
+    if requested is None:
+        return None
+    if not isinstance(requested, int):
+        raise RuntimeError(f"resolved {name} must be an integer")
+    return requested
 
 
 def _feature_count(requested: int | str | None, *, default: int) -> int:
@@ -158,7 +167,7 @@ def _resolve_time_rebin(
     if requested is None:
         requested = spec.default_time_rebin
     if requested != "auto":
-        return cast(int | None, requested)
+        return _optional_rebin_count(requested, name="time_rebin")
     if spec.frame_geometry is None:
         raise ValueError(
             f"time_rebin='auto' requires frame geometry, which method '{spec.name}' "

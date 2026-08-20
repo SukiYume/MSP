@@ -180,6 +180,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Preserve Python 3.9 execution in rebin planning and the optional HiFi-GAN generator by narrowing runtime values explicitly and postponing PEP 604 annotations.
 - Parse string Torch device identifiers explicitly so `cuda:N` seeds the requested device index instead of reading `str.index` as metadata.
 - Read the standard nn~ `sampling_rate` and four-value `forward_params`
   metadata from real exported RAVE models. Input and output channel counts are
