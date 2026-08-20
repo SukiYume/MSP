@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-from .core import (
-    _finite_float,
-    _interpolate_cyclic_profile,
-    _peak_normalize,
-    _positive_float,
-    _positive_int,
-    _wav_output_path,
-    save_audio,
-    to_profile,
-)
+from .array_ops import _interpolate_cyclic_profile, to_profile
+from .audio_io import _peak_normalize, _wav_output_path, save_audio
 from .preprocessing import _as_normalized_array
 from .timing import duration_to_samples
+from .validation import (
+    _finite_float,
+    _positive_float,
+    _positive_int,
+)
 
 _DEFAULT_COMPRESSION = 0.0
 
@@ -34,6 +32,35 @@ def _compress_profile(profile: np.ndarray, compression: float) -> np.ndarray:
     if compression == 0:
         return profile
     return np.log1p(compression * profile) / np.log1p(compression)
+
+
+def _validate_amplitude_parameters(
+    *,
+    sr: int,
+    freq: float,
+    compression: float,
+    harmonics: int,
+    harmonic_decay: float,
+) -> dict[str, Any]:
+    """Validate all amplitude-carrier controls before preprocessing."""
+    resolved_sr = _positive_int(sr, name="sr")
+    resolved_freq = _positive_float(freq, name="freq")
+    resolved_compression = _validate_compression(compression)
+    resolved_harmonics = _positive_int(harmonics, name="harmonics")
+    resolved_decay = _finite_float(harmonic_decay, name="harmonic_decay")
+    if resolved_decay < 0:
+        raise ValueError("harmonic_decay must be a finite number greater than or equal to 0")
+    if resolved_freq >= resolved_sr / 2:
+        raise ValueError(
+            f"freq must be between 0 and the Nyquist frequency ({resolved_sr / 2:g} Hz)"
+        )
+    return {
+        "sr": resolved_sr,
+        "freq": resolved_freq,
+        "compression": resolved_compression,
+        "harmonics": resolved_harmonics,
+        "harmonic_decay": resolved_decay,
+    }
 
 
 def amplitude_modulate(
@@ -71,16 +98,19 @@ def amplitude_modulate(
         Tuple of (audio_array, sample_rate).
     """
     output_path = None if output is None else _wav_output_path(output)
-    sr = _positive_int(sr, name="sr")
+    params = _validate_amplitude_parameters(
+        sr=sr,
+        freq=freq,
+        compression=compression,
+        harmonics=harmonics,
+        harmonic_decay=harmonic_decay,
+    )
+    sr = params["sr"]
+    freq = params["freq"]
+    compression = params["compression"]
+    harmonics = params["harmonics"]
+    harmonic_decay = params["harmonic_decay"]
     duration = _positive_float(duration, name="duration")
-    freq = _positive_float(freq, name="freq")
-    compression = _validate_compression(compression)
-    harmonics = _positive_int(harmonics, name="harmonics")
-    harmonic_decay = _finite_float(harmonic_decay, name="harmonic_decay")
-    if harmonic_decay < 0:
-        raise ValueError("harmonic_decay must be a finite number greater than or equal to 0")
-    if freq >= sr / 2:
-        raise ValueError(f"freq must be between 0 and the Nyquist frequency ({sr / 2:g} Hz)")
 
     n_samples = duration_to_samples(duration, sr)
     profile = to_profile(data)

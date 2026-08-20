@@ -6,7 +6,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from .core import _finite_float, _positive_int
+from .validation import _finite_float, _positive_int
 
 _GOLDEN_RATIO_CONJUGATE = (np.sqrt(5.0) - 1.0) / 2.0
 _MAX_RETRO_HARMONICS = 6

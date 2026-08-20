@@ -24,16 +24,8 @@ def test_rejects_bad_output_path_before_loading_audio_or_runtime(monkeypatch):
         musicnet_module.musicnet(np.zeros(800), output="bad.flac")
 
 
-def test_legacy_batch_size_is_accepted_and_deprecated(monkeypatch):
-    monkeypatch.setattr(
-        musicnet_module,
-        "_load_audio_input",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("validated")),
-    )
-
-    with pytest.warns(DeprecationWarning, match="batch_size"):
-        with pytest.raises(RuntimeError, match="validated"):
-            musicnet_module.musicnet(np.zeros(800), batch_size=4)
+def test_musicnet_signature_has_no_ignored_batch_size_parameter():
+    assert "batch_size" not in inspect.signature(musicnet_module.musicnet).parameters
 
 
 class _FakeCuda:
@@ -389,6 +381,26 @@ def test_musicnet_decoder_id_validation(monkeypatch, decoder_id):
 def test_musicnet_rejects_too_short_input_before_loading_torch():
     with pytest.raises(ValueError, match="at least 800"):
         musicnet_module.musicnet(np.zeros(799, dtype=np.float32))
+
+
+def test_musicnet_preflight_rejects_short_planned_audio_before_runtime(monkeypatch):
+    monkeypatch.setattr(
+        musicnet_module,
+        "_require_torch",
+        lambda: pytest.fail("runtime must not load for an invalid planned length"),
+    )
+
+    with pytest.raises(ValueError, match=r"provides 799 samples \(49\.938 ms\)"):
+        musicnet_module._preflight_musicnet(
+            input_channels=1,
+            input_sample_rate=48_000,
+            input_samples=2_397,
+            decoder_id=2,
+            checkpoint_type="bestmodel",
+            split_size=20,
+            num_threads=1,
+            seed=0,
+        )
 
 
 @pytest.mark.filterwarnings("ignore:aifc was removed in Python 3.13.*:DeprecationWarning")

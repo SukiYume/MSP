@@ -12,15 +12,13 @@ from ._perceptual import (
     _condition_synthesized_audio,
     _settings_from_mapping,
     _synthesize_prepared,
+    _validate_perceptual_parameters,
 )
 from ._perceptual_config import PERCEPTUAL_DEFAULT_DURATION, PERCEPTUAL_DEFAULTS
-from .core import (
-    _finite_float,
-    _wav_output_path,
-    save_audio,
-)
+from .audio_io import _wav_output_path, save_audio
 from .preprocessing import _as_normalized_array
 from .timing import duration_to_samples
+from .validation import _finite_float
 
 
 def _positions_or_gains(
@@ -31,9 +29,25 @@ def _positions_or_gains(
     lower: float,
     upper: float | None,
 ) -> np.ndarray | None:
+    result = _validated_control_values(values, name=name, lower=lower, upper=upper)
+    if result is None:
+        return None
+    if len(result) != count:
+        raise ValueError(f"{name} must contain exactly one value per layer ({count})")
+    return result
+
+
+def _validated_control_values(
+    values: Sequence[float] | np.ndarray | None,
+    *,
+    name: str,
+    lower: float,
+    upper: float | None,
+) -> np.ndarray | None:
+    """Validate reusable spatial controls independently of layer count."""
     if values is None:
         return None
-    message = f"{name} must be a reusable sequence of {count} finite numbers"
+    message = f"{name} must be a reusable sequence of finite numbers"
     if isinstance(values, (str, bytes, bytearray, memoryview)) or not isinstance(
         values, (Sequence, np.ndarray)
     ):
@@ -42,13 +56,42 @@ def _positions_or_gains(
         raw = list(values)
     except TypeError as exc:
         raise ValueError(message) from exc
-    if len(raw) != count:
-        raise ValueError(f"{name} must contain exactly one value per layer ({count})")
     result = np.asarray([_finite_float(value, name=name) for value in raw])
     if np.any(result < lower) or (upper is not None and np.any(result > upper)):
         interval = f"[{lower:g}, {upper:g}]" if upper is not None else f"[{lower:g}, infinity)"
         raise ValueError(f"{name} values must lie in {interval}")
     return result
+
+
+def _validate_spatial_parameters(**params: Any) -> dict[str, Any]:
+    """Validate perceptual and spatial controls before preprocessing."""
+    perceptual = {name: params[name] for name in PERCEPTUAL_DEFAULTS}
+    _validate_perceptual_parameters(**perceptual)
+    resolved = dict(params)
+    for name, lower, upper in (
+        ("pan_positions", -1.0, 1.0),
+        ("layer_gains", 0.0, None),
+    ):
+        values = _validated_control_values(
+            params[name],
+            name=name,
+            lower=lower,
+            upper=upper,
+        )
+        resolved[name] = None if values is None else tuple(values.tolist())
+    return resolved
+
+
+def _validate_spatial_context(
+    params: Mapping[str, Any],
+    input_shape: tuple[int, ...],
+) -> None:
+    """Validate layer-count-dependent controls against the planned 3-D shape."""
+    layer_count = input_shape[0]
+    for name in ("pan_positions", "layer_gains"):
+        values = params[name]
+        if values is not None and len(values) != layer_count:
+            raise ValueError(f"{name} must contain exactly one value per layer ({layer_count})")
 
 
 def spatial_sonify(
@@ -125,8 +168,8 @@ def spatial_sonify(
             event_rate_scale=event_rate_scale,
         )
         angle = (pan + 1.0) * np.pi / 4.0
-        contribution = gain * mono[:, None] * np.array([np.cos(angle), np.sin(angle)])
-        stereo += contribution
+        stereo[:, 0] += gain * np.cos(angle) * mono
+        stereo[:, 1] += gain * np.sin(angle) * mono
     audio = _condition_synthesized_audio(
         stereo,
         sr=settings.sr,

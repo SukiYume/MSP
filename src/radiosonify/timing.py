@@ -6,7 +6,8 @@ from fractions import Fraction
 
 import numpy as np
 
-from .core import _as_finite_array, _boolean, _peak_normalize, _positive_float, _positive_int
+from .audio_io import _peak_normalize
+from .validation import _as_finite_array, _boolean, _positive_float, _positive_int
 
 _MAX_RESAMPLE_DENOMINATOR = 10_000
 _OUTPUT_FADE_SECONDS = 0.005

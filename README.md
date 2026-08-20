@@ -2,21 +2,21 @@
 
 [中文说明](README_CN.md)
 
-RadioSonify converts one-, two-, and three-dimensional numerical arrays into duration-controlled audio. It provides a unified Python API, a command-line interface, deterministic signal-processing methods, optional neural timbre transforms, and provenance for each result.
+RadioSonify converts one-, two-, and three-dimensional numerical data into duration-controlled audio. A single Python API and command-line workflow cover scientific preprocessing, sonification, optional neural timbre conversion, WAV output, and reproducibility metadata.
 
-## Project overview
+## Supported data
 
-| Input | Standard layout | Default method | Output |
+| Input | Canonical layout | Default method | Audio |
 |---|---|---|---|
 | 1-D profile | `(time,)` | `amplitude` | mono |
 | 2-D matrix | `(time, feature)` | `erb` | mono |
 | 3-D layered matrix | `(layer, time, feature)` | `spatial_erb` | stereo |
 
-The physical span of the input is supplied through `data_duration`. RadioSonify applies shared preprocessing, selects or validates a sonification method, fits the requested duration, conditions the waveform, and optionally writes a WAV file.
+Two-dimensional inputs can represent dynamic spectra, spectrograms, images, or any ordered time-by-feature matrix. Three-dimensional inputs can represent polarization products, image channels, sensor layers, or other parallel matrices. `data_duration` gives the physical time span represented by the canonical time axis.
 
 ## Installation
 
-RadioSonify supports Python 3.9 through 3.13. Install the project from source:
+RadioSonify supports Python 3.9 through 3.13.
 
 ```bash
 git clone https://github.com/SukiYume/MSP.git
@@ -24,7 +24,7 @@ cd MSP
 python -m pip install .
 ```
 
-Install a neural backend when its method is needed:
+Install the extras used by each neural backend:
 
 ```bash
 python -m pip install ".[hifigan]"
@@ -33,272 +33,253 @@ python -m pip install ".[rave]"
 python -m pip install ".[all]"
 ```
 
-## Example data and cached assets
-
-Four example arrays are available for a first run:
-
-```python
-import radiosonify as rs
-
-profile = rs.load_example("profile")             # 1-D
-burst = rs.load_example("burst")                 # 2-D, corrected
-raw_burst = rs.load_example("raw_burst")         # 2-D, as recorded
-parkes_burst = rs.load_example("parkes_burst")   # 2-D, as recorded
-```
-
-The same arrays are available as files:
-
-```bash
-radiosonify download-examples --dest ./data
-```
-
-Example arrays, HiFi-GAN weights, and MusicNet checkpoints come from a pinned [`TorchLight/radiosonify`](https://huggingface.co/TorchLight/radiosonify) revision recorded in `radiosonify.hub.REVISION`, and each file downloads on first use. Downloads land in `~/.cache/radiosonify`; set `RADIOSONIFY_CACHE_DIR` before importing the package to choose another location. The `profile` method's instrument responses are synthesized locally and cached in the same directory. [MODEL_ASSETS.md](MODEL_ASSETS.md) records asset origins, transformations, verification history, and license scope.
-
-## Quick start
-
-### Python
+## First sonification
 
 ```python
 from pathlib import Path
 
-import numpy as np
 import radiosonify as rs
 
-profile_result = rs.sonify(
-    rs.load_example("profile"),
-    data_duration=1.2,
-    method="amplitude",
-    repeat=1,
-)
-
-matrix_result = rs.sonify(
-    rs.load_example("raw_burst"),
+data = rs.load_example("raw_burst")
+result = rs.sonify(
+    data,
     data_duration=2.4,
     method="erb",
     preprocess_params={"scale_statistic": "mad"},
-    output=Path("output/matrix.wav"),
+    output=Path("output/burst.wav"),
 )
 
-spatial_result = rs.sonify(
-    np.load("layers.npy"),
-    data_duration=3.0,
-    method="spatial_erb",
-)
+print(result.sample_rate, result.output_duration)
+print(result.preprocess_params)
+print(result.method_params)
 ```
 
-Each result contains the frozen audio snapshot, sample rate, selected method, source geometry, timing values, effective preprocessing settings, method settings, postprocessor settings, and output path.
-
-### Command line
+The equivalent command is:
 
 ```bash
+radiosonify download-examples --dest ./data
 radiosonify sonify \
-  --input matrix.npy \
-  --output output/matrix.wav \
+  --input data/RawBurst.npy \
+  --output output/burst.wav \
   --duration 2.4 \
   --method erb \
   --preprocess scale_statistic=mad
 ```
 
-CLI setting values use repeatable `KEY=VALUE` options. Numeric values, tuples, booleans, and `None` use Python literal syntax; plain words are parsed as strings.
+CLI settings use repeatable `KEY=VALUE` options. Python literal syntax handles numbers, tuples, dictionaries, booleans, and `None`; plain words become strings.
 
-### Discovery
+## Input axes and snapshots
 
-The installed parameter surface is available from both interfaces:
+`SonificationInput` stores a canonical immutable `float64` snapshot. It preserves the caller's original shape and axis declarations in the result.
 
-```bash
-radiosonify list-methods
-radiosonify list-settings
-radiosonify --help
-```
+| Dimensionality | Default source axes |
+|---|---|
+| 1-D | time axis `0` |
+| 2-D | time axis `0` |
+| 3-D | layer axis `0`, time axis `1` |
 
-```python
-rs.available_methods()           # every registered primary method
-rs.available_methods("matrix")   # methods accepting one input type
-rs.available_postprocessors()
-rs.default_method("matrix")
-```
-
-## Input contract
-
-`SonificationInput` copies the caller's data into a canonical `float64` array backed by an immutable buffer. Changes to the caller's array leave the stored snapshot unchanged, and the snapshot retains structural write protection under NumPy's write-flag API.
-
-The default axis rules are:
-
-| Dimensionality | Meaning | Default axes |
-|---|---|---|
-| 1-D | time profile | time axis `0` |
-| 2-D | time-by-feature matrix | time axis `0` |
-| 3-D | parallel time-by-feature layers | layer axis `0`, time axis `1` after canonicalization |
-
-Declare another source ordering when required:
+Declare another source ordering explicitly:
 
 ```python
+import numpy as np
+
+cube = np.load("layers.npy")
 source = rs.SonificationInput(
-    data,
-    duration=2.0,
-    time_axis=1,
+    cube,
+    duration=3.0,
     layer_axis=2,
+    time_axis=0,
     name="observation-17",
 )
 result = rs.sonify(source, method="spatial_erb")
 ```
 
-Finite real values form the standard input domain. `nan_policy="propagate"` treats NaN values as masked samples and maps them to silence after normalization. Infinite and complex values raise a validation error.
+The standard input domain contains real finite values. `nan_policy="propagate"` treats NaN values as masks and maps them to silence after normalization. Complex values and infinities produce validation errors.
+
+## Processing sequence
+
+Every call resolves one immutable execution plan before array transformation. This planning stage validates the selected method, all settings, feature and frame geometry, planned layer count, output path, optional dependencies, model assets, and neural channel contracts. Execution then follows this sequence:
+
+```text
+canonical input snapshot
+→ layer/time/feature resizing
+→ baseline and scale calibration
+→ optional percentile clipping
+→ timeline repetition and smoothing
+→ normalization to [0, 1]
+→ primary sonification
+→ duration fitting
+→ optional audio postprocessor
+→ output sample-rate conversion and WAV conditioning
+```
+
+The separation gives each stage one data contract: preprocessing owns scientific-array transformations, primary methods own audible mapping, postprocessors own audio-domain style conversion, and output conditioning owns the final container.
 
 ## Shared preprocessing
 
-All primary methods receive arrays normalized to `[0, 1]`. The pipeline runs in this order:
-
-```text
-time/feature rebinning
-→ baseline correction
-→ per-channel scale correction
-→ percentile clipping
-→ repetition
-→ temporal smoothing
-→ min-max normalization
-```
-
 | Setting | Purpose |
 |---|---|
-| `time_rebin` | target number of time bins; registered methods may select `"auto"` |
-| `feature_rebin` | target number of feature bins |
+| `layer_rebin` | target layer count for 3-D data, using ordered area averaging |
+| `time_rebin` | target time-bin count; methods with frame geometry can resolve `"auto"` |
+| `feature_rebin` | target feature-bin count |
 | `baseline_operation` | `"subtract"`, `"divide"`, or `None` |
 | `baseline_statistic` | `"median"` or `"mean"` |
-| `baseline_axis` | source axis used by the baseline statistic and by `scale_statistic`, or `"auto"` |
+| `baseline_axis` | calibration axis or `"auto"` |
 | `scale_statistic` | per-channel `"mad"`, `"std"`, or `None` |
-| `clip_percentiles` | `(lower, upper)` percentile pair measured across the whole array, or `None` |
-| `time_smoothing` | Gaussian width along time or `None` |
+| `clip_percentiles` | global `(lower, upper)` percentile pair or `None` |
+| `time_smoothing` | Gaussian sigma along the canonical time axis or `None` |
 | `normalization_scope` | `"global"`, `"per_layer"`, or `"auto"` |
 | `nan_policy` | `"raise"` or `"propagate"` |
 
-`repeat` belongs to the unified timing contract and joins copies along the canonical time axis. Temporal smoothing spans the joined boundaries.
+Downsampling uses equal-width area averages across the full source extent. Upsampling on time and feature axes uses bin-center interpolation. `layer_rebin` performs dimensional reduction and retains layer order. Three-dimensional data defaults to per-layer normalization so each parallel layer remains audible; `layer_gains` carries explicit scientific weighting into spatial synthesis.
 
-The stage also runs on its own, which is what each method-specific CLI command does before dispatch:
+`repeat` joins copies along the canonical time axis before temporal smoothing. This places repeated observations on one continuous timeline.
+
+The preprocessing stage is also available for analysis and inspection:
 
 ```python
-normalized = rs.preprocess(raw, scale_statistic="mad", time_rebin=2048)
-rs.preprocessing_defaults()
+import numpy as np
+
+layers = np.load("layers.npy")
+prepared_layers = rs.preprocess(
+    layers,
+    layer_rebin=4,
+    time_rebin=2048,
+    feature_rebin=512,
+    scale_statistic="mad",
+)
+defaults = rs.preprocessing_defaults()
 ```
 
-## Sonification methods
+## Primary methods
 
-| Method | Input | Mapping | Main controls | Extra |
+| Method | Inputs | Mapping | Main controls | Extra |
 |---|---|---|---|---|
 | `profile` | 1-D, 2-D | interpolated profile waveform with an optional analytic instrument response | `sr`, `instrument` | base |
 | `amplitude` | 1-D, 2-D | profile amplitude envelope on a harmonic carrier | `sr`, `freq`, `compression`, `harmonics`, `harmonic_decay` | base |
-| `erb` | 2-D | time to time, ordered features to perceptual pitch, brightness and temporal salience to amplitude | frequency, contrast, timbre, envelope, event, and level settings | base |
+| `erb` | 2-D | time to time, ordered feature position to perceptual pitch, brightness and temporal salience to level | frequency range, band count, timbre, envelope, event, and level settings | base |
 | `griffinlim` | 2-D | mel-like magnitude interpretation with deterministic iterative phase reconstruction | `sr`, `n_iter`, `n_fft`, `frame_length`, `preemphasis`, `max_db`, `ref_db` | base |
-| `hifigan` | 2-D | pinned checkpoint adapter and HiFi-GAN vocoder | registered model geometry | `hifigan` |
+| `hifigan` | 2-D | checkpoint-specific log-mel adapter followed by a HiFi-GAN vocoder | registered model geometry | `hifigan` |
 | `spatial_erb` | 3-D | one ERB synthesis per layer with constant-power stereo panning | ERB controls, `pan_positions`, `layer_gains` | base |
 
-The ERB methods use overlapping normalized perceptual bands, continuous phase carriers, deterministic timbres, optional event accents, envelope smoothing, auditory-level compensation, RMS control, and true-peak limiting.
+### ERB and spatial ERB
 
-When provided, `pan_positions` and `layer_gains` use reusable sequences with one finite value per layer; pan positions range from `-1` to `1`, and gains are `0` or greater.
+ERB synthesis uses overlapping perceptual bands, phase-continuous carriers, attack/release smoothing, bounded auditory-level compensation, RMS control, and true-peak limiting. `frequency_scale="mel"` follows an HTK mel spacing; `frequency_scale="erb"` selects ERB-rate spacing. `n_bands` controls spectral detail, and `None` derives the count from the selected frequency range.
 
-`timbre` selects the carrier waveform from `sine`, `retro_digital`, `warm_pad`, `soft_marimba`, `glass_bell`, and `instrument_palette`. `event_voice` selects `none` or `water_drop`. Advanced waveform and event controls live in the `voice_params` and `event_params` mappings, which both ERB methods share:
-
-| Mapping | Key | Default | Accepted range |
-|---|---|---|---|
-| `voice_params` | `harmonic_limit_hz` | `3500.0` | above `0`, capped at `0.475 × sr` |
-| `voice_params` | `detune_cents` | `10.0` | `0` to `50` |
-| `voice_params` | `fm_index` | `1.0` | `0` to `1` |
-| `voice_params` | `chorus_rate_hz` | `0.45` | `0` to `10` |
-| `voice_params` | `chorus_depth_ms` | `8.0` | `0` to `20` |
-| `event_params` | `salience_threshold` | `0.35` | `0` to `1` |
-| `event_params` | `max_events_per_second` | `6.0` | `0` to `100` |
-| `event_params` | `decay_ms` | `70.0` | `1` to `5000` |
-| `event_params` | `level_db` | `-20.0` | `0` and below |
-
-`harmonic_limit_hz` bounds the overtones of every timbre. `detune_cents`, `chorus_rate_hz`, and `chorus_depth_ms` shape `retro_digital`, `warm_pad`, and `instrument_palette`; `fm_index` shapes `retro_digital`. The `event_params` keys take effect once `event_voice="water_drop"` is selected.
+Available timbres are `sine`, `retro_digital`, `warm_pad`, `soft_marimba`, `glass_bell`, and `instrument_palette`. `instrument_palette` crossfades complementary voices over pitch. `event_voice="water_drop"` adds deterministic transient accents from temporal salience.
 
 ```python
+matrix = rs.load_example("raw_burst")
 result = rs.sonify(
     matrix,
     data_duration=2.4,
     method="erb",
     method_params={
-        "timbre": "glass_bell",
+        "min_freq": 90.0,
+        "max_freq": 6000.0,
+        "n_bands": 48,
+        "frequency_scale": "mel",
+        "timbre": "instrument_palette",
         "event_voice": "water_drop",
-        "voice_params": {"harmonic_limit_hz": 6000.0},
-        "event_params": {"max_events_per_second": 3.0, "level_db": -14.0},
+        "voice_params": {"harmonic_limit_hz": 6500.0},
+        "event_params": {"max_events_per_second": 3.0, "level_db": -16.0},
     },
 )
 ```
 
-Griffin-Lim derives time and feature geometry from its FFT settings. HiFi-GAN accepts the shared normalized matrix and applies its checkpoint-specific 80-bin encoding internally.
+For `spatial_erb`, `pan_positions` ranges from `-1` to `1` and `layer_gains` contains values of `0` or greater. Each sequence has one value for every planned layer after `layer_rebin`.
 
-## Optional postprocessors
+### Griffin-Lim and HiFi-GAN
 
-`musicnet` applies one of six pretrained WaveNet music styles at 16 kHz. RadioSonify validates its dependencies and pinned model assets before primary synthesis, pads the final encoder window, and crops the decoded audio to the exact input span.
+Griffin-Lim derives its valid feature count and automatic time-bin count from `n_fft`, `frame_length`, sample rate, duration, and repetition. HiFi-GAN accepts the shared normalized matrix and applies its published checkpoint's fixed 80-bin encoding within the model adapter. The data-dependent histogram offset appears in `result.method_params`.
 
-`rave` applies a trusted user-supplied TorchScript model and reads the model's sample-rate and channel metadata. RAVE TorchScript loading executes model code, so each RAVE export should come from a trusted source.
+## Audio postprocessors
+
+`musicnet` converts mono primary audio into one of six pretrained WaveNet music styles at 16 kHz. Its encoder requires at least 800 samples after resampling, equivalent to 50 ms of primary audio. Planning validates that length and resolves dependencies and pinned model assets before scientific preprocessing.
+
+`rave` applies a user-supplied exported TorchScript model. Planning loads the model on CPU, reads the standard nn~ `sampling_rate` and `forward_params` metadata, resolves input and output sample rates, and verifies channel compatibility before scientific preprocessing. Inference reloads the same contract on the selected `cpu`, `cuda`, or `mps` device. Mono one-in/one-out models process stereo channels independently, and a mono source can expand into a model's multichannel input.
+
+Use RAVE exports from trusted sources because `torch.jit.load` executes model code. Record each model's origin and license with the generated audio.
 
 ```python
-styled = rs.sonify(
+profile = rs.load_example("profile")
+matrix = rs.load_example("raw_burst")
+music_style = rs.sonify(
     profile,
     data_duration=2.0,
     method="amplitude",
     postprocess="musicnet",
     postprocess_params={"decoder_id": 2, "seed": 0},
 )
+
+rave_style = rs.sonify(
+    matrix,
+    data_duration=2.0,
+    method="erb",
+    postprocess="rave",
+    postprocess_params={
+        "model_path": "/path/to/trusted-model.ts",
+        "device": "auto",
+        "seed": 0,
+    },
+)
 ```
 
-## Timing and output
+## Duration and output
 
-Every dimensionality, primary method, and postprocessor uses the same requested-duration formula:
+All methods use one duration formula:
 
 ```text
 target_duration = data_duration × repeat ÷ speed
 ```
 
-`speed=2` produces half the duration, and `speed=0.5` produces twice the duration. The registered repeat default is `5` for `amplitude` and `1` for the other primary methods. An explicit `repeat` controls every method.
+`speed=2` produces half the source duration, and `speed=0.5` produces twice the source duration. The registered repeat default is `5` for `amplitude` and `1` for every other primary method. An explicit `repeat` overrides the registered value.
 
-`preserve_pitch=True` uses phase-vocoder time stretching. The standard polyphase path changes playback speed and pitch together. `output_sr` converts the final container rate while preserving physical duration and pitch. The final sample count is `round(sample_rate * target_duration)`.
+`preserve_pitch=True` selects phase-vocoder time stretching. The standard polyphase path changes playback speed and pitch together. `output_sr` selects the final sample rate while preserving duration and physical pitch. The final sample count is `round(output_sr × target_duration)` when `output_sr` is supplied.
 
-Output conditioning removes DC, applies short edge fades, and constrains the waveform to the WAV range. Saving creates parent directories and writes a WAV file after path validation.
+Output conditioning removes DC, applies short edge fades, constrains peak level, creates parent directories, and writes WAV data after path validation.
 
-## Result and provenance
+## Result and reproducibility
 
-`sonify` returns a frozen `SonificationResult`. Its audio array and numeric array metadata use immutable buffers.
+`sonify` returns an immutable `SonificationResult`.
 
-| Fields | Meaning |
+| Fields | Contents |
 |---|---|
-| `audio`, `sample_rate`, `output_duration`, `output_path` | final waveform and container information |
-| `data_type`, `data_duration`, `input_shape`, `source_name` | source identity and physical span |
-| `source_time_axis`, `source_layer_axis` | resolved axes in the caller's original layout |
-| `method`, `preprocess_params`, `method_params` | selected mapping and effective settings |
-| `speed`, `repeat`, `preserve_pitch`, `target_duration` | timing controls |
+| `audio`, `sample_rate`, `output_duration`, `output_path` | final waveform and container |
+| `data_type`, `data_duration`, `input_shape`, `source_name` | source identity and physical extent |
+| `source_time_axis`, `source_layer_axis` | axes in the caller's original layout |
+| `method`, `preprocess_params`, `method_params` | primary mapping and fully resolved settings |
+| `speed`, `repeat`, `preserve_pitch`, `target_duration` | timing contract |
 | `method_sample_rate`, `method_native_samples`, `method_native_duration`, `method_time_scale` | primary synthesis timing |
-| `postprocess`, `postprocess_params`, `postprocess_native_samples`, `postprocess_native_duration`, `postprocess_time_scale` | optional style-stage timing and settings |
+| `postprocess`, `postprocess_params`, `postprocess_native_samples`, `postprocess_native_duration`, `postprocess_time_scale` | optional audio-style stage |
 
-Parameter mappings are recursively copied and frozen. HiFi-GAN also records its data-dependent `histogram_offset` in `method_params`.
+Parameter mappings are recursively copied and frozen. Numeric arrays use immutable byte-backed snapshots. A reproducible publication can record the RadioSonify version, source checksum, source axes, physical duration, result parameter mappings, model revision, and output sample rate.
 
-## Low-level API and CLI adapters
+## Discovery and example assets
 
-The package exposes direct method functions for experiments that manage preprocessing and timing explicitly:
-
-```python
-rs.profile_to_wave(...)
-rs.amplitude_modulate(...)
-rs.erb_sonify(...)
-rs.griffinlim_reconstruct(...)
-rs.hifigan_vocode(...)
-rs.spatial_sonify(...)
-rs.musicnet_transform(...)
-rs.rave_transform(...)
+```bash
+radiosonify list-methods
+radiosonify list-settings
+radiosonify --help
+radiosonify download-examples --dest ./data
 ```
 
-Method-specific CLI adapters are available as `profile`, `amplitude`, `erb`, `spatial-erb`, `griffinlim`, `hifigan`, `musicnet`, and `rave`. Griffin-Lim accepts the deprecated `--n-mels`, `--freq-rebin`, and `--time-rebin` aliases and routes them into shared preprocessing. New scripts can use `--preprocess` directly. [CHANGELOG.md](CHANGELOG.md) records public migrations and deprecations.
+```python
+rs.available_methods()
+rs.available_methods("matrix")
+rs.available_postprocessors()
+rs.default_method("matrix")
 
-## Scientific use
+profile = rs.load_example("profile")
+burst = rs.load_example("burst")
+raw_burst = rs.load_example("raw_burst")
+parkes_burst = rs.load_example("parkes_burst")
+```
 
-Sonification is an interpretive representation of numerical structure. Baseline correction, clipping, normalization, resampling, synthesis, and neural style transfer each affect the audible result. Preserve the source data and record the RadioSonify version, input checksum, physical duration, axis declarations, effective parameters, model revision, and output sample rate for reproducible work.
-
-The `profile`, `amplitude`, `erb`, and `spatial_erb` methods provide deterministic signal-processing mappings. Griffin-Lim uses deterministic phase initialization. MusicNet supports a recorded random seed. RAVE behavior follows the supplied model.
+Example arrays, HiFi-GAN weights, and MusicNet checkpoints come from the pinned [`TorchLight/radiosonify`](https://huggingface.co/TorchLight/radiosonify) revision stored in `radiosonify.hub.REVISION`. Assets download on first use into `~/.cache/radiosonify`; `RADIOSONIFY_CACHE_DIR` selects another cache directory. Analytic `profile` instrument responses are generated locally and cached alongside downloaded assets. [MODEL_ASSETS.md](MODEL_ASSETS.md) records origins, transformations, verification history, and license scope.
 
 ## Development and license
 
-Development setup, validation commands, and contribution rules live in [CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) contains the development setup, module boundaries, and validation commands. [CHANGELOG.md](CHANGELOG.md) records each release.
 
-MSP-authored code uses the [MIT License](LICENSE). The included MusicNet inference subset and checkpoints use CC BY-NC 4.0 with a non-commercial-use condition. Distribution metadata uses `MIT AND CC-BY-NC-4.0`. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) provides component-level terms for each vendored component.
+MSP-authored code uses the [MIT License](LICENSE). The vendored MusicNet inference subset and checkpoints use CC BY-NC 4.0 with a non-commercial-use condition. Distribution metadata uses `MIT AND CC-BY-NC-4.0`, and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) gives component-level terms.

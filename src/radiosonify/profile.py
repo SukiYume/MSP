@@ -3,25 +3,39 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import soundfile as sf
 from scipy import signal
 
-from .core import (
-    _interpolate_cyclic_profile,
-    _peak_normalize,
-    _positive_float,
-    _positive_int,
-    _wav_output_path,
-    save_audio,
-    to_profile,
-)
+from .array_ops import _interpolate_cyclic_profile, to_profile
+from .audio_io import _peak_normalize, _wav_output_path, save_audio
 from .hub import get_instrument_path
 from .preprocessing import _as_normalized_array
 from .timing import _resample_audio_rate, duration_to_samples
+from .validation import _positive_float, _positive_int
 
 _WAVE_PEAK = 0.95
+
+
+def _validate_profile_parameters(
+    *,
+    sr: int,
+    instrument: str | None,
+) -> dict[str, Any]:
+    """Validate and normalize profile synthesis controls before preprocessing."""
+    resolved_sr = _positive_int(sr, name="sr")
+    if instrument not in (None, "violin", "piano"):
+        raise ValueError("instrument must be 'violin', 'piano', or None")
+    return {"sr": resolved_sr, "instrument": instrument}
+
+
+def _preflight_profile(*, sr: int, instrument: str | None) -> None:
+    """Resolve an explicitly requested instrument response before data work."""
+    del sr
+    if instrument is not None:
+        get_instrument_path(instrument)
 
 
 def _read_wave(file: str) -> tuple[np.ndarray, int]:
@@ -39,7 +53,7 @@ def profile_to_wave(
     data: np.ndarray,
     sr: int = 48000,
     duration: float = 10.0,
-    instrument: str | None = "violin",
+    instrument: str | None = None,
     output: str | Path | None = None,
 ) -> tuple[np.ndarray, int]:
     """把脉冲轮廓转换为可听波形。
@@ -54,20 +68,16 @@ def profile_to_wave(
         sr: Sample rate in Hz.
         duration: Output audio duration in seconds.
         instrument: Instrument for convolution ('violin', 'piano', or None).
-            This entry point keeps 'violin' for compatibility. The registered
-            unified-API default is None, so :func:`radiosonify.sonify` treats
-            the instrument response as opt-in; ``radiosonify list-settings``
-            prints the registered value.
         output: Path to save WAV file. None = don't save.
 
     Returns:
         Tuple of (audio_array, sample_rate).
     """
     output_path = None if output is None else _wav_output_path(output)
-    sr = _positive_int(sr, name="sr")
+    params = _validate_profile_parameters(sr=sr, instrument=instrument)
+    sr = params["sr"]
+    instrument = params["instrument"]
     duration = _positive_float(duration, name="duration")
-    if instrument not in (None, "violin", "piano"):
-        raise ValueError("instrument must be 'violin', 'piano', or None")
 
     n_samples = duration_to_samples(duration, sr)
 

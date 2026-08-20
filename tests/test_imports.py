@@ -56,12 +56,18 @@ for name, module in (
 ):
     print(name, isinstance(module, ModuleType), getattr(radiosonify, name) is module)
 for alias in (
+    "del_burst",
+    "rebin_spectrogram",
+    "profile_to_wave",
+    "amplitude_modulate",
+    "erb_sonify",
+    "spatial_sonify",
     "griffinlim_reconstruct",
     "hifigan_vocode",
     "musicnet_transform",
     "rave_transform",
 ):
-    print(alias, callable(getattr(radiosonify, alias)))
+    print(alias, hasattr(radiosonify, alias))
 """
     )
 
@@ -70,10 +76,16 @@ for alias in (
         "hifigan True True",
         "musicnet True True",
         "rave True True",
-        "griffinlim_reconstruct True",
-        "hifigan_vocode True",
-        "musicnet_transform True",
-        "rave_transform True",
+        "del_burst False",
+        "rebin_spectrogram False",
+        "profile_to_wave False",
+        "amplitude_modulate False",
+        "erb_sonify False",
+        "spatial_sonify False",
+        "griffinlim_reconstruct False",
+        "hifigan_vocode False",
+        "musicnet_transform False",
+        "rave_transform False",
     ]
 
 

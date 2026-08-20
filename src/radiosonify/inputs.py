@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .core import _as_real_array, _immutable_array, _positive_float
+from .validation import _as_real_array, _immutable_array, _positive_float
 
 
 class DataType(str, Enum):

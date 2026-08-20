@@ -1,24 +1,14 @@
-"""RadioSonify：把一维轮廓和多维数值数组转换为时长可控的音频。
-
-推荐从 :func:`sonify` 和 :class:`SonificationInput` 开始；底层方法继续保留，
-用于需要方法原生时长或复现旧结果的场景。
-"""
+"""RadioSonify: duration-aware audio mapping for 1-D, 2-D, and 3-D arrays."""
 
 from __future__ import annotations
 
 import importlib
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
-from .amplitude import amplitude_modulate
 from .api import SonificationResult, sonify
-from .core import (
-    del_burst,
-    normalize,
-    rebin_spectrogram,
-    save_audio,
-    to_profile,
-)
+from .array_ops import normalize, to_profile
+from .audio_io import save_audio
 from .inputs import DataType, SonificationInput, infer_data_type
 from .preprocessing import preprocess, preprocessing_defaults
 from .registry import (
@@ -37,16 +27,9 @@ from .timing import (
 )
 
 _LAZY_EXPORTS = {
-    "profile_to_wave": (".profile", "profile_to_wave"),
-    "erb_sonify": (".erb", "erb_sonify"),
     "erb_frequencies": (".erb", "erb_frequencies"),
     "mel_frequencies": (".erb", "mel_frequencies"),
-    "griffinlim_reconstruct": (".griffinlim", "griffinlim"),
-    "hifigan_vocode": (".hifigan", "hifigan"),
     "load_example": (".hub", "load_example"),
-    "musicnet_transform": (".musicnet", "musicnet"),
-    "rave_transform": (".rave", "rave"),
-    "spatial_sonify": (".spatial", "spatial_sonify"),
     "STYLE_NAMES": (".musicnet", "STYLE_NAMES"),
 }
 
@@ -86,20 +69,10 @@ __all__ = [
     "preprocess",
     "preprocessing_defaults",
     "normalize",
-    "del_burst",
-    "rebin_spectrogram",
     "to_profile",
     "save_audio",
     "load_example",
-    "profile_to_wave",
-    "amplitude_modulate",
-    "erb_sonify",
     "erb_frequencies",
     "mel_frequencies",
-    "griffinlim_reconstruct",
-    "hifigan_vocode",
-    "musicnet_transform",
-    "rave_transform",
-    "spatial_sonify",
     "STYLE_NAMES",
 ]

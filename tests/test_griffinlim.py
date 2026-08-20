@@ -7,7 +7,7 @@ import pytest
 from radiosonify.griffinlim import griffinlim
 
 griffinlim_module = importlib.import_module("radiosonify.griffinlim")
-core_module = importlib.import_module("radiosonify.core")
+validation_module = importlib.import_module("radiosonify.validation")
 
 LEGACY_GRIFFIN_TIME_BINS = 128
 LEGACY_GRIFFIN_FREQ_BINS = 512
@@ -31,13 +31,13 @@ class TestGriffinLim:
 
     def test_preprocessing_scans_input_finiteness_once(self, monkeypatch):
         calls = []
-        original_isfinite = core_module.np.isfinite
+        original_isfinite = validation_module.np.isfinite
 
         def tracked_isfinite(value):
             calls.append(np.asarray(value).shape)
             return original_isfinite(value)
 
-        monkeypatch.setattr(core_module.np, "isfinite", tracked_isfinite)
+        monkeypatch.setattr(validation_module.np, "isfinite", tracked_isfinite)
         prepared = griffinlim_module._prepare_spectrogram(
             np.arange(256, dtype=np.float64).reshape(16, 16) / 255,
             n_fft=32,

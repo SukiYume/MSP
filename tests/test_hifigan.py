@@ -1,4 +1,5 @@
 import importlib
+import inspect
 import json
 import sys
 import types
@@ -6,10 +7,8 @@ import types
 import numpy as np
 import pytest
 
-import radiosonify as rs
-
 hifigan_module = importlib.import_module("radiosonify.hifigan")
-core_module = importlib.import_module("radiosonify.core")
+validation_module = importlib.import_module("radiosonify.validation")
 
 
 def test_rejects_bad_output_path_before_spectrogram_preparation(monkeypatch):
@@ -25,20 +24,18 @@ def test_rejects_bad_output_path_before_spectrogram_preparation(monkeypatch):
 
 def test_preprocessing_scans_input_finiteness_once(monkeypatch):
     calls = []
-    original_isfinite = core_module.np.isfinite
+    original_isfinite = validation_module.np.isfinite
 
     def tracked_isfinite(value):
         calls.append(np.asarray(value).shape)
         return original_isfinite(value)
 
-    monkeypatch.setattr(core_module.np, "isfinite", tracked_isfinite)
+    monkeypatch.setattr(validation_module.np, "isfinite", tracked_isfinite)
     prepared = hifigan_module._prepare_spectrogram(
         np.arange(256, dtype=np.float64).reshape(16, 16) / 255,
-        time_rebin=8,
-        time_smoothing=None,
     )
 
-    assert prepared.shape == (8, 16)
+    assert prepared.shape == (16, 16)
     assert calls == [(16, 16)]
 
 
@@ -293,55 +290,19 @@ class TestHifiGAN:
         with pytest.raises(ValueError, match="finite"):
             hifigan_module.hifigan(spec)
 
-    def test_rejects_invalid_rebin_before_loading_optional_dependencies(self):
-        with pytest.raises(ValueError, match="time_rebin"):
-            hifigan_module.hifigan(np.ones((4, 4)), time_rebin=0)
+    def test_low_level_signature_has_no_shared_preprocessing_controls(self):
+        parameters = inspect.signature(hifigan_module.hifigan).parameters
 
-    def test_direct_low_level_rebin_can_upsample(self):
-        prepared = hifigan_module._prepare_spectrogram(
-            np.arange(16.0).reshape(4, 4) / 15,
-            time_rebin=9,
-            time_smoothing=None,
-        )
-
-        assert prepared.shape == (9, 4)
-        assert prepared.min() >= 0
-        assert prepared.max() <= 1
+        assert "time_rebin" not in parameters
+        assert "time_smoothing" not in parameters
 
     def test_rejects_data_that_skipped_shared_preprocessing(self):
         with pytest.raises(ValueError, match="preprocess"):
             hifigan_module.hifigan(np.arange(16.0).reshape(4, 4))
 
-    @pytest.mark.parametrize("time_smoothing", [0, -1, np.inf, True, "0.75"])
-    def test_rejects_invalid_time_smoothing_before_loading_model(self, time_smoothing):
-        with pytest.raises(ValueError, match="time_smoothing"):
-            hifigan_module.hifigan(
-                np.ones((4, 4)),
-                time_smoothing=time_smoothing,
-            )
-
-    def test_time_smoothing_only_uses_time_axis(
-        self,
-        fake_hifigan_runtime,
-        monkeypatch,
-    ):
-        calls = []
-
-        def fake_filter(data, sigma, axis, mode):
-            calls.append((data.shape, sigma, axis, mode))
-            return data
-
-        monkeypatch.setattr(hifigan_module, "gaussian_filter1d", fake_filter)
-        hifigan_module.hifigan(
-            np.random.default_rng(42).random((32, 64)),
-            time_smoothing=0.75,
-        )
-
-        assert calls == [((32, 64), 0.75, 0, "reflect")]
-
     def test_returns_audio_and_sr(self, fake_hifigan_runtime):
         spec = np.random.default_rng(42).random((256, 1024))
-        audio, sr = hifigan_module.hifigan(spec, time_rebin=128)
+        audio, sr = hifigan_module.hifigan(spec)
         assert isinstance(audio, np.ndarray)
         assert audio.ndim == 1
         assert np.all(np.isfinite(audio))
@@ -368,25 +329,14 @@ class TestHifiGAN:
     def test_reuses_loaded_generator(self, fake_hifigan_runtime):
         spec = np.random.default_rng(42).random((256, 1024))
 
-        hifigan_module.hifigan(spec, time_rebin=128)
-        hifigan_module.hifigan(spec, time_rebin=128)
+        hifigan_module.hifigan(spec)
+        hifigan_module.hifigan(spec)
 
         assert _FakeGenerator.init_count == 1
-
-    def test_top_level_neural_alias_remains_callable_after_first_call(
-        self,
-        fake_hifigan_runtime,
-    ):
-        spec = np.random.default_rng(42).random((32, 64))
-
-        rs.hifigan_vocode(spec)
-        assert callable(rs.hifigan_vocode)
-        rs.hifigan_vocode(spec)
-        assert callable(rs.hifigan_vocode)
 
     def test_saves_to_file(self, fake_hifigan_runtime, tmp_path):
         spec = np.random.default_rng(42).random((256, 1024))
         out = tmp_path / "hifigan.wav"
-        audio, sr = hifigan_module.hifigan(spec, time_rebin=128, output=str(out))
+        audio, sr = hifigan_module.hifigan(spec, output=str(out))
         assert out.exists()
         assert out.stat().st_size > 0

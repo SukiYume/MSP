@@ -4,26 +4,20 @@ from __future__ import annotations
 
 import json
 import logging
-import warnings
 from argparse import Namespace
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
+from fractions import Fraction
 from pathlib import Path
 from typing import TypedDict
 
 import numpy as np
 
-from .core import (
-    _as_finite_array,
-    _nonnegative_int,
-    _peak_normalize,
-    _positive_int,
-    _wav_output_path,
-    require,
-    save_audio,
-)
+from .audio_io import _peak_normalize, _wav_output_path, save_audio
 from .hub import get_model_path
+from .runtime import _temporary_torch_seed, require
 from .timing import _resample_audio_rate
+from .validation import _as_finite_array, _nonnegative_int, _positive_int
 
 _logger = logging.getLogger(__name__)
 _ENCODER_POOL = 800
@@ -111,6 +105,9 @@ def _validate_musicnet_parameters(
 
 def _preflight_musicnet(
     *,
+    input_channels: int,
+    input_sample_rate: int,
+    input_samples: int,
     decoder_id: int,
     checkpoint_type: str,
     split_size: int,
@@ -118,6 +115,21 @@ def _preflight_musicnet(
     seed: int | None,
 ) -> None:
     """Resolve optional dependencies and pinned assets before primary synthesis."""
+    if input_channels != 1:
+        raise ValueError("MusicNet accepts mono primary audio")
+    primary_sr = _positive_int(input_sample_rate, name="primary audio sample rate")
+    primary_samples = _positive_int(input_samples, name="primary audio samples")
+    model_samples = max(
+        1,
+        round(Fraction(primary_samples * _MUSICNET_SAMPLE_RATE, primary_sr)),
+    )
+    if model_samples < _ENCODER_POOL:
+        duration_ms = 1_000.0 * primary_samples / primary_sr
+        raise ValueError(
+            f"MusicNet requires at least {_ENCODER_POOL} samples at "
+            f"{_MUSICNET_SAMPLE_RATE} Hz after resampling; the planned primary audio "
+            f"provides {model_samples} samples ({duration_ms:.3f} ms)"
+        )
     del split_size, num_threads, seed
     _require_torch()
     _require_tqdm()
@@ -168,18 +180,6 @@ def _temporary_num_threads(torch, num_threads: int | None):
         yield
     finally:
         torch.set_num_threads(previous)
-
-
-@contextmanager
-def _temporary_random_seed(torch, seed: int | None):
-    """为随机解码设置可复现种子，同时不污染调用者的全局 CPU RNG。"""
-    if seed is None:
-        yield
-        return
-    with torch.random.fork_rng(devices=[]):
-        # 解码器固定在 CPU，只播种 CPU 默认生成器，避免触碰未纳入快照的 CUDA RNG。
-        torch.random.default_generator.manual_seed(seed)
-        yield
 
 
 def _select_devices(torch):
@@ -269,7 +269,6 @@ def musicnet(
     decoder_id: int = 2,
     checkpoint_type: str = "bestmodel",
     sr: int = _MUSICNET_SAMPLE_RATE,
-    batch_size: int | None = None,
     split_size: int = 20,
     num_threads: int | None = 1,
     seed: int | None = 0,
@@ -287,9 +286,6 @@ def musicnet(
         checkpoint_type: 'bestmodel' or 'lastmodel'.
         sr: Sample rate of an array input. Files use their embedded rate.
             Inference and output always use the model's native 16 kHz rate.
-        batch_size: Deprecated compatibility argument scheduled for removal in
-            0.3.0. A positive value is accepted and ignored because this entry
-            point handles one recording.
         split_size: Split size for autoregressive generation.
         num_threads: CPU threads for decoder. None = keep current. Default 1.
         seed: Non-negative random seed. None keeps stochastic decoding.
@@ -300,14 +296,6 @@ def musicnet(
     """
     output_path = None if output is None else _wav_output_path(output)
     input_sr = _positive_int(sr, name="sr")
-    if batch_size is not None:
-        _positive_int(batch_size, name="batch_size")
-        warnings.warn(
-            "batch_size is deprecated, ignored, and scheduled for removal in 0.3.0; "
-            "musicnet processes one recording at a time",
-            DeprecationWarning,
-            stacklevel=2,
-        )
     parameters = _validate_musicnet_parameters(
         decoder_id=decoder_id,
         checkpoint_type=checkpoint_type,
@@ -338,7 +326,7 @@ def musicnet(
         _MUSICNET_SAMPLE_RATE,
     )
 
-    with _temporary_random_seed(torch, parameters["seed"]):
+    with _temporary_torch_seed(torch, parameters["seed"]):
         encoder, decoder = _build_models(
             torch,
             model_args=model_args,

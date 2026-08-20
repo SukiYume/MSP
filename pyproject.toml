@@ -60,6 +60,7 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.4",
     "twine>=5.1",
+    "vulture>=2.11",
 ]
 
 [project.scripts]
@@ -77,6 +78,8 @@ include = [
     "tests",
     "examples",
     "assets",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
     "LICENSE",
     "MODEL_ASSETS.md",
     "README_CN.md",
@@ -94,6 +97,17 @@ packages = ["src/radiosonify"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore:.*torch.jit.*:DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["radiosonify"]
+omit = ["src/radiosonify/models/*"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
 
 [tool.mypy]
 # Current mypy releases type-check 3.10+ syntax; Python 3.9 compatibility is
@@ -110,8 +124,16 @@ line-length = 100
 exclude = ["src/radiosonify/models"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "UP", "B", "C90"]
 ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 [tool.ruff.format]
 line-ending = "lf"
+
+[tool.vulture]
+paths = ["src/radiosonify"]
+exclude = ["src/radiosonify/models/"]
+min_confidence = 90

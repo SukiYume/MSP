@@ -16,16 +16,15 @@ from ._perceptual_config import (
     VOICE_DEFAULTS,
 )
 from ._voices import _render_voice
-from .core import (
-    _MAD_TO_GAUSSIAN_SIGMA,
+from .array_ops import _MAD_TO_GAUSSIAN_SIGMA, _rebin_axis
+from .timing import condition_audio_output, duration_to_samples
+from .validation import (
     _choice,
     _finite_float,
     _merge_settings,
     _positive_float,
     _positive_int,
-    _rebin_axis,
 )
-from .timing import condition_audio_output, duration_to_samples
 
 _MIN_ROBUST_SCALE = 1e-6
 _SALIENCE_SATURATION_SIGMA = 2.0
@@ -277,6 +276,18 @@ def _settings_from_mapping(values: Mapping[str, Any]) -> _SynthesisSettings:
         duration=values["duration"],
         **{name: values[name] for name in PERCEPTUAL_DEFAULTS},
     )
+
+
+def _validate_perceptual_parameters(**params: Any) -> dict[str, Any]:
+    """Validate registered perceptual controls before array preprocessing."""
+    missing = tuple(name for name in PERCEPTUAL_DEFAULTS if name not in params)
+    if missing:
+        raise RuntimeError(f"perceptual registry omitted parameter(s): {', '.join(missing)}")
+    _resolve_synthesis_settings(
+        duration=1.0,
+        **{name: params[name] for name in PERCEPTUAL_DEFAULTS},
+    )
+    return dict(params)
 
 
 def _prepare_values(

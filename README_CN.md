@@ -2,21 +2,21 @@
 
 [English](README.md)
 
-RadioSonify 将一维、二维和三维数值数组转换为时长可控的音频。项目提供统一 Python API、命令行入口、确定性信号处理方法、可选神经音色变换，以及完整的结果溯源信息。
+RadioSonify 将一维、二维和三维数值数据转换为时长可控的音频。统一的 Python API 与命令行流程覆盖科学数组预处理、声化、可选神经音色转换、WAV 输出和复现元数据。
 
-## 项目概览
+## 支持的数据
 
-| 输入 | 标准布局 | 默认方法 | 输出 |
+| 输入 | 标准布局 | 默认方法 | 音频 |
 |---|---|---|---|
 | 一维轮廓 | `(time,)` | `amplitude` | 单声道 |
 | 二维矩阵 | `(time, feature)` | `erb` | 单声道 |
 | 三维分层矩阵 | `(layer, time, feature)` | `spatial_erb` | 立体声 |
 
-输入通过 `data_duration` 声明其物理时间跨度。RadioSonify 依次执行共享预处理、方法选择与校验、目标时长拟合、波形整形，并可写出 WAV 文件。
+二维输入可表示动态谱、声谱图、图像或其他有序的时间乘特征矩阵。三维输入可表示偏振分量、图像通道、传感器分层或其他并列矩阵。`data_duration` 给出标准时间轴代表的物理时间跨度。
 
 ## 安装
 
-RadioSonify 支持 Python 3.9 至 3.13。源码安装命令如下：
+RadioSonify 支持 Python 3.9 至 3.13。
 
 ```bash
 git clone https://github.com/SukiYume/MSP.git
@@ -24,7 +24,7 @@ cd MSP
 python -m pip install .
 ```
 
-神经后端按所需方法安装：
+各神经后端使用对应扩展依赖：
 
 ```bash
 python -m pip install ".[hifigan]"
@@ -33,272 +33,253 @@ python -m pip install ".[rave]"
 python -m pip install ".[all]"
 ```
 
-## 示例数据与本地缓存
-
-首次运行可直接使用四份示例数组：
-
-```python
-import radiosonify as rs
-
-profile = rs.load_example("profile")             # 一维
-burst = rs.load_example("burst")                 # 二维，已校正
-raw_burst = rs.load_example("raw_burst")         # 二维，原始记录
-parkes_burst = rs.load_example("parkes_burst")   # 二维，原始记录
-```
-
-同样的数组也可保存为文件：
-
-```bash
-radiosonify download-examples --dest ./data
-```
-
-示例数组、HiFi-GAN 权重和 MusicNet checkpoint 均来自固定 revision 的 [`TorchLight/radiosonify`](https://huggingface.co/TorchLight/radiosonify)，该 revision 记录在 `radiosonify.hub.REVISION`，每个文件在首次使用时下载。下载内容保存在 `~/.cache/radiosonify`；在导入本包之前设置 `RADIOSONIFY_CACHE_DIR` 可选择其他目录。`profile` 方法的乐器响应在本地合成，并缓存到同一目录。[MODEL_ASSETS.md](MODEL_ASSETS.md) 记录资产来源、转换过程、核验历史和许可证范围。
-
-## 快速开始
-
-### Python
+## 第一次声化
 
 ```python
 from pathlib import Path
 
-import numpy as np
 import radiosonify as rs
 
-profile_result = rs.sonify(
-    rs.load_example("profile"),
-    data_duration=1.2,
-    method="amplitude",
-    repeat=1,
-)
-
-matrix_result = rs.sonify(
-    rs.load_example("raw_burst"),
+data = rs.load_example("raw_burst")
+result = rs.sonify(
+    data,
     data_duration=2.4,
     method="erb",
     preprocess_params={"scale_statistic": "mad"},
-    output=Path("output/matrix.wav"),
+    output=Path("output/burst.wav"),
 )
 
-spatial_result = rs.sonify(
-    np.load("layers.npy"),
-    data_duration=3.0,
-    method="spatial_erb",
-)
+print(result.sample_rate, result.output_duration)
+print(result.preprocess_params)
+print(result.method_params)
 ```
 
-每个结果包含冻结音频快照、采样率、所选方法、来源几何、时序数值、有效预处理设置、方法设置、后处理设置和输出路径。
-
-### 命令行
+对应的命令行为：
 
 ```bash
+radiosonify download-examples --dest ./data
 radiosonify sonify \
-  --input matrix.npy \
-  --output output/matrix.wav \
+  --input data/RawBurst.npy \
+  --output output/burst.wav \
   --duration 2.4 \
   --method erb \
   --preprocess scale_statistic=mad
 ```
 
-CLI 设置采用可重复的 `KEY=VALUE` 选项。数值、元组、布尔值和 `None` 使用 Python 字面量语法，普通单词按字符串解析。
+CLI 设置使用可重复的 `KEY=VALUE` 选项。数值、元组、字典、布尔值和 `None` 采用 Python 字面量语法，普通单词解析为字符串。
 
-### 功能查询
+## 输入轴与数据快照
 
-两个界面都可以列出当前安装版本的参数面：
+`SonificationInput` 保存标准布局的不可变 `float64` 快照。结果同时记录调用者的原始形状和轴声明。
 
-```bash
-radiosonify list-methods
-radiosonify list-settings
-radiosonify --help
-```
+| 维数 | 默认来源轴 |
+|---|---|
+| 一维 | 时间轴 `0` |
+| 二维 | 时间轴 `0` |
+| 三维 | 层轴 `0`，时间轴 `1` |
 
-```python
-rs.available_methods()           # 全部已注册主方法
-rs.available_methods("matrix")   # 接受某一输入类型的方法
-rs.available_postprocessors()
-rs.default_method("matrix")
-```
-
-## 输入契约
-
-`SonificationInput` 将调用者数据复制为标准布局的 `float64` 数组，并采用冻结底层缓冲区。调用者后续修改原数组时，存储快照保持构造时的数值；NumPy 写标记持续保持关闭状态。
-
-默认轴规则如下：
-
-| 维数 | 含义 | 默认轴 |
-|---|---|---|
-| 一维 | 时间轮廓 | 时间轴 `0` |
-| 二维 | 时间乘特征矩阵 | 时间轴 `0` |
-| 三维 | 多个时间乘特征分层 | 来源层轴 `0`，标准化后的时间轴 `1` |
-
-其他来源布局通过轴参数声明：
+其他来源布局可显式声明：
 
 ```python
+import numpy as np
+
+cube = np.load("layers.npy")
 source = rs.SonificationInput(
-    data,
-    duration=2.0,
-    time_axis=1,
+    cube,
+    duration=3.0,
     layer_axis=2,
+    time_axis=0,
     name="observation-17",
 )
 result = rs.sonify(source, method="spatial_erb")
 ```
 
-标准输入域为有限实数。`nan_policy="propagate"` 将 NaN 视为掩码样本，并在归一化后映射为静音。无穷值和复数会触发输入校验错误。
+标准输入域包含有限实数。`nan_policy="propagate"` 将 NaN 视作掩码，并在归一化后映射为静音。复数和无穷值会触发校验错误。
+
+## 处理顺序
+
+每次调用都会在数组变换前解析出一份不可变执行计划。计划阶段统一校验所选方法、全部设置、特征与帧几何、计划层数、输出路径、可选依赖、模型资产和神经模型通道契约。执行阶段采用以下顺序：
+
+```text
+标准输入快照
+→ 层/时间/特征轴尺寸调整
+→ 基线与尺度校正
+→ 可选分位裁剪
+→ 时间线重复与平滑
+→ 归一化到 [0, 1]
+→ 主声化
+→ 时长拟合
+→ 可选音频后处理
+→ 输出采样率转换与 WAV 整形
+```
+
+各阶段拥有单一数据契约：预处理负责科学数组变换，主方法负责可听映射，后处理器负责音频域风格转换，输出整形负责最终容器。
 
 ## 共享预处理
 
-所有主声化方法接收归一化到 `[0, 1]` 的数组。流水线顺序如下：
-
-```text
-时间轴与特征轴重分箱
-→ 基线校正
-→ 逐通道尺度校正
-→ 分位裁剪
-→ 重复
-→ 时间平滑
-→ min-max 归一化
-```
-
 | 设置 | 用途 |
 |---|---|
-| `time_rebin` | 目标时间格数；带帧几何的方法可使用 `"auto"` |
+| `layer_rebin` | 三维数据的目标层数，采用有序面积平均 |
+| `time_rebin` | 目标时间格数；带帧几何的方法可解析 `"auto"` |
 | `feature_rebin` | 目标特征格数 |
 | `baseline_operation` | `"subtract"`、`"divide"` 或 `None` |
 | `baseline_statistic` | `"median"` 或 `"mean"` |
-| `baseline_axis` | 基线统计与 `scale_statistic` 共用的来源轴，或 `"auto"` |
+| `baseline_axis` | 校正轴或 `"auto"` |
 | `scale_statistic` | 逐通道 `"mad"`、`"std"` 或 `None` |
-| `clip_percentiles` | 在整个数组上统计的 `(lower, upper)` 分位数组合，或 `None` |
-| `time_smoothing` | 时间轴高斯宽度或 `None` |
+| `clip_percentiles` | 全数组 `(lower, upper)` 分位数组合或 `None` |
+| `time_smoothing` | 标准时间轴上的高斯 sigma 或 `None` |
 | `normalization_scope` | `"global"`、`"per_layer"` 或 `"auto"` |
 | `nan_policy` | `"raise"` 或 `"propagate"` |
 
-`repeat` 属于统一时序契约，并沿标准时间轴连接数据副本。时间平滑覆盖连接边界。
+降采样使用覆盖完整来源范围的等宽面积平均。时间轴与特征轴升采样使用格中心插值。`layer_rebin` 执行降维并保留层顺序。三维数据默认逐层归一化，让每个并列层保持可听；`layer_gains` 可将显式科学权重带入空间合成。
 
-该阶段也可单独调用，方法专用 CLI 命令在分发之前执行的正是同一阶段：
+`repeat` 在时间平滑之前沿标准时间轴拼接副本，使重复观测形成连续时间线。
+
+预处理也可以独立调用，便于分析和检查：
 
 ```python
-normalized = rs.preprocess(raw, scale_statistic="mad", time_rebin=2048)
-rs.preprocessing_defaults()
+import numpy as np
+
+layers = np.load("layers.npy")
+prepared_layers = rs.preprocess(
+    layers,
+    layer_rebin=4,
+    time_rebin=2048,
+    feature_rebin=512,
+    scale_statistic="mad",
+)
+defaults = rs.preprocessing_defaults()
 ```
 
-## 声化方法
+## 主声化方法
 
-| 方法 | 输入 | 映射 | 主要控制 | Extra |
+| 方法 | 输入 | 映射 | 主要控制项 | 扩展依赖 |
 |---|---|---|---|---|
-| `profile` | 一维、二维 | 插值轮廓波形，可叠加解析生成的乐器响应 | `sr`、`instrument` | base |
-| `amplitude` | 一维、二维 | 轮廓振幅包络控制谐波载波 | `sr`、`freq`、`compression`、`harmonics`、`harmonic_decay` | base |
-| `erb` | 二维 | 时间映射到时间，有序特征映射到感知音高，亮度和时间显著性映射到振幅 | 频率、对比度、音色、包络、事件和电平设置 | base |
-| `griffinlim` | 二维 | 以 mel 风格幅度解释矩阵，通过确定性迭代相位重建音频 | `sr`、`n_iter`、`n_fft`、`frame_length`、`preemphasis`、`max_db`、`ref_db` | base |
-| `hifigan` | 二维 | 固定 checkpoint 适配器和 HiFi-GAN 声码器 | 注册模型几何 | `hifigan` |
-| `spatial_erb` | 三维 | 每层执行一次 ERB 合成，并采用恒功率立体声声像 | ERB 设置、`pan_positions`、`layer_gains` | base |
+| `profile` | 一维、二维 | 插值轮廓波形与可选解析乐器响应 | `sr`、`instrument` | 基础安装 |
+| `amplitude` | 一维、二维 | 谐波载波上的轮廓振幅包络 | `sr`、`freq`、`compression`、`harmonics`、`harmonic_decay` | 基础安装 |
+| `erb` | 二维 | 时间映射到时间，有序特征位置映射到感知音高，亮度与时间显著性映射到声级 | 频率范围、频带数、音色、包络、事件和声级设置 | 基础安装 |
+| `griffinlim` | 二维 | 类 mel 幅度解释与确定性迭代相位重建 | `sr`、`n_iter`、`n_fft`、`frame_length`、`preemphasis`、`max_db`、`ref_db` | 基础安装 |
+| `hifigan` | 二维 | checkpoint 专用 log-mel 适配器与 HiFi-GAN 声码器 | 注册模型几何 | `hifigan` |
+| `spatial_erb` | 三维 | 每层独立 ERB 合成与恒功率立体声声像 | ERB 控制项、`pan_positions`、`layer_gains` | 基础安装 |
 
-ERB 方法采用重叠归一化感知频带、连续相位载波、确定性音色、可选事件重音、包络平滑、听觉电平补偿、RMS 控制和真峰值限制。
+### ERB 与 spatial ERB
 
-传入 `pan_positions` 和 `layer_gains` 时，使用每层各含一个有限值的可重复读取序列；声像值范围为 `-1` 至 `1`，增益为 `0` 或更大值。
+ERB 合成使用重叠感知频带、相位连续载波、起音/释音平滑、受限听觉声级补偿、RMS 控制和真峰值限制。`frequency_scale="mel"` 使用 HTK mel 间距，`frequency_scale="erb"` 使用 ERB-rate 间距。`n_bands` 控制频谱细节，`None` 会根据所选频率范围计算频带数。
 
-`timbre` 在 `sine`、`retro_digital`、`warm_pad`、`soft_marimba`、`glass_bell` 和 `instrument_palette` 中选择载波波形。`event_voice` 可选 `none` 或 `water_drop`。进阶波形与事件控制归入 `voice_params` 和 `event_params` 两个映射，两种 ERB 方法共用：
-
-| 映射 | 键 | 默认值 | 取值范围 |
-|---|---|---|---|
-| `voice_params` | `harmonic_limit_hz` | `3500.0` | 大于 `0`，上限为 `0.475 × sr` |
-| `voice_params` | `detune_cents` | `10.0` | `0` 至 `50` |
-| `voice_params` | `fm_index` | `1.0` | `0` 至 `1` |
-| `voice_params` | `chorus_rate_hz` | `0.45` | `0` 至 `10` |
-| `voice_params` | `chorus_depth_ms` | `8.0` | `0` 至 `20` |
-| `event_params` | `salience_threshold` | `0.35` | `0` 至 `1` |
-| `event_params` | `max_events_per_second` | `6.0` | `0` 至 `100` |
-| `event_params` | `decay_ms` | `70.0` | `1` 至 `5000` |
-| `event_params` | `level_db` | `-20.0` | `0` 及以下 |
-
-`harmonic_limit_hz` 约束全部音色的泛音上限。`detune_cents`、`chorus_rate_hz` 和 `chorus_depth_ms` 作用于 `retro_digital`、`warm_pad` 和 `instrument_palette`；`fm_index` 作用于 `retro_digital`。`event_params` 各键在选择 `event_voice="water_drop"` 后生效。
+可用音色包括 `sine`、`retro_digital`、`warm_pad`、`soft_marimba`、`glass_bell` 和 `instrument_palette`。`instrument_palette` 随音高连续交叉混合互补音色。`event_voice="water_drop"` 根据时间显著性加入确定性瞬态点缀。
 
 ```python
+matrix = rs.load_example("raw_burst")
 result = rs.sonify(
     matrix,
     data_duration=2.4,
     method="erb",
     method_params={
-        "timbre": "glass_bell",
+        "min_freq": 90.0,
+        "max_freq": 6000.0,
+        "n_bands": 48,
+        "frequency_scale": "mel",
+        "timbre": "instrument_palette",
         "event_voice": "water_drop",
-        "voice_params": {"harmonic_limit_hz": 6000.0},
-        "event_params": {"max_events_per_second": 3.0, "level_db": -14.0},
+        "voice_params": {"harmonic_limit_hz": 6500.0},
+        "event_params": {"max_events_per_second": 3.0, "level_db": -16.0},
     },
 )
 ```
 
-Griffin-Lim 根据 FFT 设置解析时间与特征几何。HiFi-GAN 接收共享归一化矩阵，并在方法内部执行 checkpoint 所需的 80 格特征编码。
+`spatial_erb` 的 `pan_positions` 取值范围为 `-1` 至 `1`，`layer_gains` 取值为 `0` 或正数。两个序列都需要为 `layer_rebin` 之后的每个计划层提供一个值。
 
-## 可选后处理
+### Griffin-Lim 与 HiFi-GAN
 
-`musicnet` 在 16 kHz 下应用六种预训练 WaveNet 音乐风格。RadioSonify 会在主声化前校验依赖和固定模型资产，补齐编码器末尾窗口，并将解码音频裁回精确输入跨度。
+Griffin-Lim 根据 `n_fft`、`frame_length`、采样率、时长和重复次数推导有效特征格数与自动时间格数。HiFi-GAN 接收共享归一化矩阵，并在模型适配器内执行已发布 checkpoint 的固定 80 格编码。随数据变化的直方图偏移记录在 `result.method_params` 中。
 
-`rave` 应用用户提供的可信 TorchScript 模型，并读取模型采样率和声道元数据。RAVE TorchScript 加载会执行模型代码，因此每个 RAVE 导出文件都应来自可信来源。
+## 音频后处理器
+
+`musicnet` 将单声道主音频转换为六种预训练 WaveNet 音乐风格之一，原生采样率为 16 kHz。编码器需要重采样后至少 800 个样本，对应 50 ms 的主音频。计划阶段会在科学预处理之前验证长度，并解析依赖和固定模型资产。
+
+`rave` 使用用户提供的 TorchScript 导出模型。计划阶段先在 CPU 加载模型，读取标准 nn~ `sampling_rate` 与 `forward_params` 元数据，解析输入/输出采样率，并在科学预处理之前验证通道兼容性。推理阶段在所选 `cpu`、`cuda` 或 `mps` 设备重新核对同一契约。单进单出的单声道模型可逐声道处理立体声，单声道来源也可扩展到模型的多通道输入。
+
+RAVE 导出文件适合来自可信来源，因为 `torch.jit.load` 会执行模型代码。生成音频时可同时记录模型来源和许可证。
 
 ```python
-styled = rs.sonify(
+profile = rs.load_example("profile")
+matrix = rs.load_example("raw_burst")
+music_style = rs.sonify(
     profile,
     data_duration=2.0,
     method="amplitude",
     postprocess="musicnet",
     postprocess_params={"decoder_id": 2, "seed": 0},
 )
+
+rave_style = rs.sonify(
+    matrix,
+    data_duration=2.0,
+    method="erb",
+    postprocess="rave",
+    postprocess_params={
+        "model_path": "/path/to/trusted-model.ts",
+        "device": "auto",
+        "seed": 0,
+    },
+)
 ```
 
 ## 时长与输出
 
-所有输入维数、主方法和后处理器共享同一目标时长公式：
+全部方法采用同一个时长公式：
 
 ```text
 target_duration = data_duration × repeat ÷ speed
 ```
 
-`speed=2` 生成一半时长，`speed=0.5` 生成两倍时长。`amplitude` 的注册重复默认值为 `5`，其他主方法为 `1`。显式 `repeat` 可控制所有方法。
+`speed=2` 产生来源时长的一半，`speed=0.5` 产生来源时长的两倍。`amplitude` 的注册重复默认值为 `5`，其余主方法为 `1`。显式 `repeat` 会覆盖注册值。
 
-`preserve_pitch=True` 使用相位声码器伸缩。标准多相路径同步改变播放速度和音高。`output_sr` 转换最终容器采样率，同时保持物理时长与音高。最终样本数为 `round(sample_rate * target_duration)`。
+`preserve_pitch=True` 选择相位声码器时间伸缩。标准多相路径会让播放速度与音高一起变化。`output_sr` 选择最终采样率，并保持时长和物理音高。提供 `output_sr` 时，最终样本数为 `round(output_sr × target_duration)`。
 
-输出整形会移除直流分量、添加短边缘淡化，并将波形限制在 WAV 范围内。保存流程先校验路径，再创建父目录并写入 WAV 文件。
+输出整形会移除直流分量、添加短边缘淡入淡出、约束峰值、创建父目录，并在路径校验后写入 WAV。
 
-## 结果与溯源
+## 结果与复现
 
-`sonify` 返回冻结的 `SonificationResult`。音频数组和数值数组元数据均使用冻结底层缓冲区。
+`sonify` 返回不可变的 `SonificationResult`。
 
-| 字段 | 含义 |
+| 字段 | 内容 |
 |---|---|
-| `audio`、`sample_rate`、`output_duration`、`output_path` | 最终波形和容器信息 |
-| `data_type`、`data_duration`、`input_shape`、`source_name` | 来源身份和物理跨度 |
-| `source_time_axis`、`source_layer_axis` | 调用者原始布局中的解析轴 |
-| `method`、`preprocess_params`、`method_params` | 所选映射和有效设置 |
-| `speed`、`repeat`、`preserve_pitch`、`target_duration` | 时序控制 |
-| `method_sample_rate`、`method_native_samples`、`method_native_duration`、`method_time_scale` | 主声化阶段时序 |
-| `postprocess`、`postprocess_params`、`postprocess_native_samples`、`postprocess_native_duration`、`postprocess_time_scale` | 可选风格阶段时序和设置 |
+| `audio`、`sample_rate`、`output_duration`、`output_path` | 最终波形与容器 |
+| `data_type`、`data_duration`、`input_shape`、`source_name` | 来源标识与物理范围 |
+| `source_time_axis`、`source_layer_axis` | 调用者原始布局中的轴 |
+| `method`、`preprocess_params`、`method_params` | 主映射与完整解析设置 |
+| `speed`、`repeat`、`preserve_pitch`、`target_duration` | 时长契约 |
+| `method_sample_rate`、`method_native_samples`、`method_native_duration`、`method_time_scale` | 主合成时序 |
+| `postprocess`、`postprocess_params`、`postprocess_native_samples`、`postprocess_native_duration`、`postprocess_time_scale` | 可选音频风格阶段 |
 
-参数映射会递归复制并冻结。HiFi-GAN 还会在 `method_params` 中记录数据相关的 `histogram_offset`。
+参数映射会递归复制并冻结，数值数组使用不可变字节缓冲区快照。用于发表和复现时，可记录 RadioSonify 版本、来源校验和、来源轴、物理时长、结果参数映射、模型 revision 和输出采样率。
 
-## 底层 API 与 CLI 适配器
+## 功能查询与示例资产
 
-底层方法函数适用于自行管理预处理和时序的实验：
-
-```python
-rs.profile_to_wave(...)
-rs.amplitude_modulate(...)
-rs.erb_sonify(...)
-rs.griffinlim_reconstruct(...)
-rs.hifigan_vocode(...)
-rs.spatial_sonify(...)
-rs.musicnet_transform(...)
-rs.rave_transform(...)
+```bash
+radiosonify list-methods
+radiosonify list-settings
+radiosonify --help
+radiosonify download-examples --dest ./data
 ```
 
-方法专用 CLI 适配器包括 `profile`、`amplitude`、`erb`、`spatial-erb`、`griffinlim`、`hifigan`、`musicnet` 和 `rave`。Griffin-Lim 接受已弃用的 `--n-mels`、`--freq-rebin` 和 `--time-rebin` 别名，并将其路由到共享预处理。新脚本可直接使用 `--preprocess`。[CHANGELOG.md](CHANGELOG.md) 记录公开迁移和弃用计划。
+```python
+rs.available_methods()
+rs.available_methods("matrix")
+rs.available_postprocessors()
+rs.default_method("matrix")
 
-## 科学使用
+profile = rs.load_example("profile")
+burst = rs.load_example("burst")
+raw_burst = rs.load_example("raw_burst")
+parkes_burst = rs.load_example("parkes_burst")
+```
 
-声化是数值结构的解释性表达。基线校正、裁剪、归一化、重采样、合成和神经风格变换都会影响听觉结果。可复现实验应保存源数据，并记录 RadioSonify 版本、输入校验和、物理时长、轴声明、有效参数、模型 revision 和输出采样率。
-
-`profile`、`amplitude`、`erb` 和 `spatial_erb` 提供确定性信号处理映射。Griffin-Lim 使用确定性相位初值。MusicNet 支持记录随机种子。RAVE 行为由所提供模型决定。
+示例数组、HiFi-GAN 权重和 MusicNet checkpoint 来自固定 revision 的 [`TorchLight/radiosonify`](https://huggingface.co/TorchLight/radiosonify)，revision 存储在 `radiosonify.hub.REVISION`。资产在首次使用时下载到 `~/.cache/radiosonify`，`RADIOSONIFY_CACHE_DIR` 可选择其他缓存目录。`profile` 的解析乐器响应在本地生成，并与下载资产共用缓存目录。[MODEL_ASSETS.md](MODEL_ASSETS.md) 记录来源、转换、核验历史和许可证范围。
 
 ## 开发与许可证
 
-[`CONTRIBUTING.md`](CONTRIBUTING.md) 提供开发环境、验证命令和贡献规则。
+[CONTRIBUTING.md](CONTRIBUTING.md) 包含开发环境、模块边界和验证命令。[CHANGELOG.md](CHANGELOG.md) 记录各版本变更。
 
-MSP 编写的代码采用 [MIT License](LICENSE)。随附的 MusicNet 推理子集和 checkpoint 采用 CC BY-NC 4.0，并带有非商业用途条件。发行元数据采用 `MIT AND CC-BY-NC-4.0`。[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 提供各随附组件的组件级条款。
+MSP 自有代码使用 [MIT License](LICENSE)。内置 MusicNet 推理子集与 checkpoint 使用带非商业用途条件的 CC BY-NC 4.0。分发元数据采用 `MIT AND CC-BY-NC-4.0`，[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 提供各组件条款。

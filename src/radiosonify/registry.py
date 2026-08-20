@@ -59,6 +59,12 @@ class MethodSpec:
     # 方法内部若存在数据依赖的量（如 HiFi-GAN 的直方图偏移），通过 ``provenance``
     # 出参交回统一 API 记入结果，避免出现结果里看不出来的隐藏变换。
     emits_provenance: bool = False
+    validator_module: str | None = None
+    validator_name: str | None = None
+    preflight_module: str | None = None
+    preflight_name: str | None = None
+    context_validator_module: str | None = None
+    context_validator_name: str | None = None
 
     @property
     def parameters(self) -> tuple[str, ...]:
@@ -75,6 +81,44 @@ class MethodSpec:
             Callable[..., tuple[Any, int]],
             _load_callable(self.runner_module, self.runner_name),
         )
+
+    def validate_params(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        """Validate and normalize method controls before preprocessing."""
+        validator = _optional_registered_callable(
+            self.validator_module,
+            self.validator_name,
+            owner=f"method '{self.name}' validator",
+        )
+        if validator is None:
+            return dict(params)
+        result = validator(**params)
+        if not isinstance(result, Mapping) or set(result) != set(self.defaults):
+            raise RuntimeError(f"method '{self.name}' validator returned an invalid parameter set")
+        return dict(result)
+
+    def preflight(self, params: Mapping[str, Any]) -> None:
+        """Resolve optional runtimes and assets before preprocessing."""
+        checker = _optional_registered_callable(
+            self.preflight_module,
+            self.preflight_name,
+            owner=f"method '{self.name}' preflight",
+        )
+        if checker is not None:
+            checker(**params)
+
+    def validate_context(
+        self,
+        params: Mapping[str, Any],
+        input_shape: tuple[int, ...],
+    ) -> None:
+        """Validate controls that depend on the planned input geometry."""
+        validator = _optional_registered_callable(
+            self.context_validator_module,
+            self.context_validator_name,
+            owner=f"method '{self.name}' context validator",
+        )
+        if validator is not None:
+            validator(params, input_shape)
 
     def resolve_frame_geometry(self, method_params: Mapping[str, Any]) -> tuple[int, int]:
         """返回该方法在给定参数下的 ``(sample_rate, hop_length)``。"""
@@ -101,6 +145,18 @@ class MethodSpec:
         default_bins, max_bins = resolver(method_params)
         return int(default_bins), int(max_bins)
 
+    def resolve_output_sample_rate(self, method_params: Mapping[str, Any]) -> int:
+        """Resolve the sample rate promised by the registered method contract."""
+        if self.frame_geometry is not None:
+            sample_rate, _ = self.resolve_frame_geometry(method_params)
+            return int(sample_rate)
+        try:
+            return int(method_params["sr"])
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise RuntimeError(
+                f"method '{self.name}' does not expose a resolvable output sample rate"
+            ) from exc
+
 
 @dataclass(frozen=True)
 class PostprocessorSpec:
@@ -119,7 +175,11 @@ class PostprocessorSpec:
     preflight_name: str | None = None
     # 后处理器能接受的最大声道数。统一 API 在主声化之前就用它拒绝不兼容组合，
     # 而不是让立体声结果跑完整段合成后才在后处理入口失败。
-    max_input_channels: int = 2
+    max_input_channels: int | None = None
+    # Playback speed is normally applied after an aesthetic transform so the
+    # model receives audio at its natural temporal scale.
+    apply_speed_after: bool = True
+    output_peak: float | None = 0.9
 
     @property
     def parameters(self) -> tuple[str, ...]:
@@ -133,27 +193,54 @@ class PostprocessorSpec:
 
     def validate_params(self, params: Mapping[str, Any]) -> dict[str, Any]:
         """用注册的验证器规范化参数；无验证器时返回普通副本。"""
-        if self.validator_module is None or self.validator_name is None:
+        validator = _optional_registered_callable(
+            self.validator_module,
+            self.validator_name,
+            owner=f"postprocessor '{self.name}' validator",
+        )
+        if validator is None:
             return dict(params)
-        validator = cast(
-            Callable[..., dict[str, Any]],
-            _load_callable(self.validator_module, self.validator_name),
-        )
-        return validator(**params)
-
-    def preflight(self, params: Mapping[str, Any]) -> None:
-        """Check optional runtime and asset availability before primary synthesis."""
-        if self.preflight_module is None and self.preflight_name is None:
-            return
-        if self.preflight_module is None or self.preflight_name is None:
+        result = validator(**params)
+        if not isinstance(result, Mapping) or set(result) != set(self.defaults):
             raise RuntimeError(
-                f"postprocessor '{self.name}' has an incomplete preflight registration"
+                f"postprocessor '{self.name}' validator returned an invalid parameter set"
             )
-        checker = cast(
-            Callable[..., None],
-            _load_callable(self.preflight_module, self.preflight_name),
+        return dict(result)
+
+    def prepare(
+        self,
+        params: Mapping[str, Any],
+        *,
+        input_channels: int,
+        input_sample_rate: int,
+        input_samples: int,
+    ) -> dict[str, Any]:
+        """Resolve runtime controls and primary-audio compatibility before synthesis."""
+        if self.max_input_channels is not None and input_channels > self.max_input_channels:
+            raise ValueError(
+                f"postprocess '{self.name}' accepts at most {self.max_input_channels} channel(s), "
+                f"but the selected method produces {input_channels}"
+            )
+        checker = _optional_registered_callable(
+            self.preflight_module,
+            self.preflight_name,
+            owner=f"postprocessor '{self.name}' preflight",
         )
-        checker(**params)
+        if checker is None:
+            return {}
+        result = checker(
+            input_channels=input_channels,
+            input_sample_rate=input_sample_rate,
+            input_samples=input_samples,
+            **params,
+        )
+        if result is None:
+            return {}
+        if not isinstance(result, Mapping):
+            raise RuntimeError(
+                f"postprocessor '{self.name}' preflight returned invalid runtime controls"
+            )
+        return dict(result)
 
 
 def _defaults(**values: Any) -> Mapping[str, Any]:
@@ -174,6 +261,20 @@ def _load_callable(module_name: str, runner_name: str) -> Callable[..., Any]:
     return runner
 
 
+def _optional_registered_callable(
+    module_name: str | None,
+    callable_name: str | None,
+    *,
+    owner: str,
+) -> Callable[..., Any] | None:
+    """Resolve an optional registered callback and reject half registrations."""
+    if module_name is None and callable_name is None:
+        return None
+    if module_name is None or callable_name is None:
+        raise RuntimeError(f"{owner} registration is incomplete")
+    return _load_callable(module_name, callable_name)
+
+
 # 方法按由轻量、可解释到神经模型的顺序排列，展示顺序和自动选择都由此表决定。
 _METHODS = (
     MethodSpec(
@@ -186,6 +287,10 @@ _METHODS = (
         description="Interpolate the time profile, optionally convolving a synthesized response.",
         runner_module="radiosonify.profile",
         runner_name="profile_to_wave",
+        validator_module="radiosonify.profile",
+        validator_name="_validate_profile_parameters",
+        preflight_module="radiosonify.profile",
+        preflight_name="_preflight_profile",
         synthesizes_duration=True,
         # 二维输入沿特征轴平均成轮廓。用 feature_rebin=1 表达，这样"求平均"
         # 也走统一预处理，并出现在结果的 preprocess_params 里。
@@ -204,6 +309,8 @@ _METHODS = (
         description="Map a profile linearly to a fixed harmonic carrier's amplitude envelope.",
         runner_module="radiosonify.amplitude",
         runner_name="amplitude_modulate",
+        validator_module="radiosonify.amplitude",
+        validator_name="_validate_amplitude_parameters",
         synthesizes_duration=True,
         default_repeat=5,
         default_for=(DataType.PROFILE,),
@@ -219,6 +326,8 @@ _METHODS = (
         ),
         runner_module="radiosonify.erb",
         runner_name="erb_sonify",
+        validator_module="radiosonify._perceptual",
+        validator_name="_validate_perceptual_parameters",
         synthesizes_duration=True,
         default_for=(DataType.MATRIX,),
         grouped_defaults=_defaults(
@@ -242,6 +351,8 @@ _METHODS = (
         description="Treat the full 2-D intensity array as a mel-like magnitude map.",
         runner_module="radiosonify.griffinlim",
         runner_name="griffinlim",
+        validator_module="radiosonify.griffinlim",
+        validator_name="_validate_griffinlim_parameters",
         # Griffin--Lim 的输出长度完全由输入帧数决定，因此和 HiFi-GAN 一样支持
         # 由目标时长反推输入帧数。不这样做就只能先合成再重采样：实测
         # speed=0.5 时会出现 6.3 倍的多相拉伸，音高整体下移、带宽塌陷。
@@ -261,6 +372,8 @@ _METHODS = (
         ),
         runner_module="radiosonify.hifigan",
         runner_name="hifigan",
+        preflight_module="radiosonify.hifigan",
+        preflight_name="_preflight_hifigan",
         optional_extra="hifigan",
         frame_geometry=("radiosonify.hifigan", "_frame_geometry"),
         default_time_rebin="auto",
@@ -281,6 +394,10 @@ _METHODS = (
         ),
         runner_module="radiosonify.spatial",
         runner_name="spatial_sonify",
+        validator_module="radiosonify.spatial",
+        validator_name="_validate_spatial_parameters",
+        context_validator_module="radiosonify.spatial",
+        context_validator_name="_validate_spatial_context",
         synthesizes_duration=True,
         default_for=(DataType.LAYERED_MATRIX,),
         grouped_defaults=_defaults(
@@ -293,14 +410,6 @@ _METHODS = (
 )
 
 _METHOD_BY_NAME = {spec.name: spec for spec in _METHODS}
-_METHOD_ALIASES = {
-    "profile_to_wave": "profile",
-    "amplitude_modulate": "amplitude",
-    "erb_filterbank": "erb",
-    "griffin_lim": "griffinlim",
-    "spatial": "spatial_erb",
-}
-
 _POSTPROCESSORS = (
     PostprocessorSpec(
         name="musicnet",
@@ -329,6 +438,7 @@ _POSTPROCESSORS = (
         defaults=_defaults(
             model_path=None,
             device="auto",
+            seed=0,
         ),
         description="Apply a user-supplied exported RAVE model as an aesthetic timbre transform.",
         runner_module="radiosonify.rave",
@@ -336,6 +446,8 @@ _POSTPROCESSORS = (
         optional_extra="rave",
         validator_module="radiosonify.rave",
         validator_name="_validate_rave_parameters",
+        preflight_module="radiosonify.rave",
+        preflight_name="_preflight_rave",
     ),
 )
 _POSTPROCESSOR_BY_NAME = {spec.name: spec for spec in _POSTPROCESSORS}
@@ -364,15 +476,13 @@ def default_method(data_type: DataType | str) -> str:
 
 
 def resolve_method(method: str, data_type: DataType | str) -> MethodSpec:
-    """解析 ``auto``/别名，并检查方法与数据类型是否兼容。"""
+    """Resolve ``auto`` and check method/input compatibility."""
     if not isinstance(method, str) or not method.strip():
         raise ValueError("method must be a non-empty string")
     resolved_type = parse_data_type(data_type)
     key = method.strip().lower().replace("-", "_").replace(" ", "_")
     if key == "auto":
         key = default_method(resolved_type)
-    key = _METHOD_ALIASES.get(key, key)
-
     try:
         spec = _METHOD_BY_NAME[key]
     except KeyError as exc:

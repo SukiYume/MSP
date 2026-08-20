@@ -8,17 +8,12 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
 
-from .core import (
-    _positive_float,
-    _positive_int,
-    _wav_output_path,
-    require,
-    save_audio,
-)
+from .audio_io import _wav_output_path, save_audio
 from .hub import get_model_path
-from .preprocessing import _as_normalized_array, _resize_axis
+from .preprocessing import _as_normalized_array
+from .runtime import require
+from .validation import _positive_int
 
 
 def _require_torch():
@@ -83,32 +78,9 @@ def _rescale_data(data: np.ndarray, resize_fn) -> tuple[np.ndarray, float]:
     return data.T[np.newaxis, :, :], d  # (1, 80, T)
 
 
-def _prepare_spectrogram(
-    spectrogram: np.ndarray,
-    *,
-    time_rebin: int | None,
-    time_smoothing: float | None,
-) -> np.ndarray:
-    """验证统一预处理后的输入。
-
-    统一 API 已经在预处理阶段完成时间轴重分箱和平滑，这里两个参数都会是
-    ``None``；保留它们只为直接调用低层函数的场景。
-    """
-    data = _as_normalized_array(spectrogram, name="spectrogram", ndim=2)
-
-    if time_smoothing is not None:
-        time_smoothing = _positive_float(time_smoothing, name="time_smoothing")
-        data = gaussian_filter1d(
-            data,
-            sigma=time_smoothing,
-            axis=0,
-            mode="reflect",
-        )
-
-    if time_rebin is not None:
-        time_rebin = _positive_int(time_rebin, name="time_rebin")
-        data = _resize_axis(data, time_rebin, axis=0)
-    return data
+def _prepare_spectrogram(spectrogram: np.ndarray) -> np.ndarray:
+    """Validate the shared preprocessing contract without changing the data."""
+    return _as_normalized_array(spectrogram, name="spectrogram", ndim=2)
 
 
 def _torch_load_state_dict(torch, checkpoint_path: str, device):
@@ -155,10 +127,18 @@ def _load_generator(
     return generator, sampling_rate, device
 
 
+def _preflight_hifigan() -> None:
+    """Resolve dependencies, pinned assets, and the cached generator early."""
+    torch = _require_torch()
+    _require_skimage()
+    config_path = get_model_path("hifigan", "config.json")
+    checkpoint_path = get_model_path("hifigan", "generator.pth")
+    device_name = "cuda" if torch.cuda.is_available() else "cpu"
+    _load_generator(config_path, checkpoint_path, device_name)
+
+
 def hifigan(
     spectrogram: np.ndarray,
-    time_rebin: int | None = None,
-    time_smoothing: float | None = None,
     output: str | Path | None = None,
     *,
     provenance: dict | None = None,
@@ -174,10 +154,6 @@ def hifigan(
         spectrogram: Preprocessed ``[0, 1]`` 2D array (time x feature). The
             feature width remains a scientific-preprocessing choice; this
             checkpoint adapter always resizes it internally to 80 bins.
-        time_rebin: Rebin time axis. None = keep original.
-        time_smoothing: Gaussian smoothing sigma along time bins. None = disabled.
-            This leaves frequency-channel baselines, including narrow-band RFI,
-            intact while reducing isolated time-domain granularity.
         output: Path to save WAV file. None = don't save.
         provenance: Optional dict that receives data-dependent quantities
             resolved during the call, currently ``histogram_offset``.
@@ -188,11 +164,7 @@ def hifigan(
     output_path = None if output is None else _wav_output_path(output)
     if provenance is not None and not isinstance(provenance, dict):
         raise ValueError("provenance must be a dict or None")
-    data = _prepare_spectrogram(
-        spectrogram,
-        time_rebin=time_rebin,
-        time_smoothing=time_smoothing,
-    )
+    data = _prepare_spectrogram(spectrogram)
 
     torch = _require_torch()
     resize_fn = _require_skimage()

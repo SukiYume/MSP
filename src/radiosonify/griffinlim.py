@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import librosa
 import numpy as np
 from scipy import signal as scipy_signal
 
-from .core import (
+from .audio_io import _peak_normalize, _wav_output_path, save_audio
+from .preprocessing import _as_normalized_array
+from .validation import (
     _finite_float,
-    _peak_normalize,
     _positive_float,
     _positive_int,
-    _wav_output_path,
-    save_audio,
 )
-from .preprocessing import _as_normalized_array
 
 # ---------- 频谱变换内部步骤 ----------
 
@@ -113,6 +112,46 @@ def _validate_synthesis_settings(
         max_db,
         ref_db,
     )
+
+
+def _validate_griffinlim_parameters(
+    *,
+    sr: int,
+    n_iter: int,
+    n_fft: int,
+    frame_length: float,
+    preemphasis: float,
+    max_db: float,
+    ref_db: float,
+) -> dict[str, Any]:
+    """Validate all Griffin-Lim controls before array preprocessing."""
+    (
+        resolved_sr,
+        resolved_iterations,
+        resolved_fft,
+        _win_length,
+        _hop,
+        resolved_preemphasis,
+        resolved_max_db,
+        resolved_ref_db,
+    ) = _validate_synthesis_settings(
+        sr=sr,
+        n_iter=n_iter,
+        n_fft=n_fft,
+        frame_length=frame_length,
+        preemphasis=preemphasis,
+        max_db=max_db,
+        ref_db=ref_db,
+    )
+    return {
+        "sr": resolved_sr,
+        "n_iter": resolved_iterations,
+        "n_fft": resolved_fft,
+        "frame_length": float(frame_length),
+        "preemphasis": resolved_preemphasis,
+        "max_db": resolved_max_db,
+        "ref_db": resolved_ref_db,
+    }
 
 
 def _hop_length(sr: int, frame_length: float) -> int:

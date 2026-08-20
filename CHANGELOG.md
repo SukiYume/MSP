@@ -4,7 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-20
+
 ### Added
+
+- Add immutable execution planning before scientific-array processing. Method validators, geometry checks, output checks, optional dependency checks, model-asset resolution, postprocessor channel checks, and RAVE TorchScript contract inspection now finish before preprocessing begins.
+- Add `layer_rebin` for ordered area-average reduction of three-dimensional layer stacks. Spatial pan and gain controls validate against the planned layer count.
+- Add a real TorchScript RAVE contract test, a 90% owned-code coverage gate, a McCabe complexity limit of 10, Vulture dead-code scanning, and repository-wide LF normalization.
 
 - Register the grouped `voice_params` and `event_params` defaults on the ERB
   method specs, and expand them in `list-settings`. The two mappings default to
@@ -30,7 +36,7 @@ All notable changes to this project are documented in this file.
   channel along the time axis, so a method-level axis switch silently produced a
   baseline along the wrong axis.
 - Add a `sonify` CLI command exposing the unified pipeline, plus `list-settings`
-  and a repeatable `--preprocess KEY=VALUE` option on every array command.
+  and repeatable preprocessing, method, and postprocessor settings.
 - Add `time_rebin='auto'` support to Griffin-Lim through registered frame
   geometry. It previously synthesized at its input's native length and was then
   resampled: at `speed=0.5` that was a 6.3x stretch, shifting pitch and
@@ -70,35 +76,22 @@ All notable changes to this project are documented in this file.
   caller's `voice_params` subset, so one record carried two conventions. A
   misspelled key inside a group is now also rejected before synthesis starts.
 
-- Merge the three copies of settings validation into one `core._merge_settings`.
+- Merge the three copies of settings validation into one `validation._merge_settings`.
   Method parameters, preprocessing parameters, postprocessor parameters and the
   grouped `voice_params`/`event_params` mappings now report an unrecognized key
   the same way, including the list of accepted names.
-- Print every registered method and postprocessor default in `list-settings`,
-  and name the required install extra in `list-methods`. A registered default
-  that never reaches the user is a default the user cannot reproduce; this is
-  how the unified API's `instrument=None` becomes visible next to the low-level
-  `profile_to_wave(instrument="violin")` compatibility default.
-- Expose `--frame-length`, `--preemphasis`, `--max-db` and `--ref-db` on the
-  low-level `griffinlim` command, so every registered method parameter is
-  reachable from its own command rather than only through `sonify
-  --method-param`.
+- Print every registered method and postprocessor default in `list-settings`, and name the required install extra in `list-methods`.
+- Split the former `core.py` catch-all into `validation.py`, `array_ops.py`, `audio_io.py`, and `runtime.py`. Split public orchestration into plan resolution in `planning.py`, execution in `pipeline.py`, and result assembly in `api.py`.
+- Route command-line execution through `radiosonify sonify`, with repeatable `--preprocess`, `--method-param`, and `--postprocess-param` settings.
 - Resolve `RADIOSONIFY_CACHE_DIR` on each call instead of at import, so a
   process that configures the cache after importing the package still
   redirects its downloads and generated instrument responses.
 - Document that `baseline_axis` also selects the per-channel direction used by
   `scale_statistic`, and that percentile clipping is measured across the whole
   array while `normalization_scope` governs only the following min-max step.
-- Deprecate `rebin_spectrogram()` for removal in 0.3. `preprocess(time_rebin=,
-  feature_rebin=)` resizes in both directions and records the effective
-  settings in the result, while the older helper rejected upsampling.
-
-### Removed
-
-- Remove `MethodSpec.label`, `MethodSpec.model_feature_bins`, and the
-  single-valued `normalization` preprocessing setting. Nothing read the first
-  two, the third accepted exactly one value, and the checkpoint bin count is
-  already owned by `radiosonify.hifigan`.
+- Keep all scientific resizing in `preprocess()` and record its effective settings in every result.
+- Validate MusicNet's 800-sample encoder minimum from the planned primary-audio length before preprocessing or model loading.
+- Include every document linked from the README in the source distribution and verify that inventory in CI.
 
 - Rebuild the `water_drop` event voice around a quiet band-limited impact and a
   delayed, damped bubble resonance at the mapped pitch. Coordinate-derived
@@ -127,8 +120,8 @@ All notable changes to this project are documented in this file.
   clip bounds computed at input resolution are set by single-sample noise.
 - Move every remaining data-domain knob out of the methods:
   `time_downsample`, `time_rebin`, `freq_rebin`/`n_mels`, `time_smoothing`,
-  `time_axis` and `layer_axis` are no longer method parameters, and supplying
-  one now names its replacement.
+  `time_axis` and `layer_axis` are method-independent settings, and method
+  parameter validation rejects these retired names.
 - Keep percentile clipping available as an explicit preprocessing option while
   leaving it disabled by default, so the standard pipeline preserves the full
   input value range.
@@ -173,17 +166,27 @@ All notable changes to this project are documented in this file.
   at the source time dimension, while the result records the resolved integer.
 - Preserve raw HiFi-GAN generator gain during final DC/fade conditioning rather
   than normalizing quiet neural background to a `0.9` peak.
-- Give same-named submodules standard Python import behavior. The former package
-  function names migrate to `griffinlim_reconstruct`, `hifigan_vocode`,
-  `musicnet_transform`, and `rave_transform`.
+- Give same-named submodules standard Python import behavior and keep the package
+  root focused on the unified API, discovery, preprocessing, timing, and I/O.
 - Rewrite the English and Chinese user guides around installation, the unified
   API, the full preprocessing contract, methods, timing, and provenance.
-- Deprecate the orphaned `del_burst()` compatibility helper for removal in 0.3;
-  shared `preprocess()` settings now define the maintained conditioning path.
-- Route the Griffin-Lim CLI `--n-mels`, `--freq-rebin`, and `--time-rebin`
-  compatibility aliases into shared preprocessing.
+- Use shared `preprocess()` settings as the maintained conditioning path.
+
+### Removed
+
+- Remove the deprecated `del_burst()` and `rebin_spectrogram()` helpers, package-root method aliases, method-name aliases, method-specific CLI commands, Griffin-Lim compatibility options, HiFi-GAN method-local resizing and smoothing controls, and the ignored MusicNet `batch_size` argument.
+- Remove `MethodSpec.label`, `MethodSpec.model_feature_bins`, and the single-valued `normalization` preprocessing setting. The checkpoint bin count remains owned by `radiosonify.hifigan`.
+- Remove duplicate choice validators, duplicate FFT test helpers, unused HiFi-GAN configuration attributes, and obsolete resampling implementations.
 
 ### Fixed
+
+- Parse string Torch device identifiers explicitly so `cuda:N` seeds the requested device index instead of reading `str.index` as metadata.
+- Read the standard nn~ `sampling_rate` and four-value `forward_params`
+  metadata from real exported RAVE models. Input and output channel counts are
+  now independent, so official mono-input/stereo-output models no longer fail
+  against the synthetic `sr`/`n_channels` contract previously used by tests.
+- Record a RAVE inference seed and restore the caller's Torch RNG state after
+  conversion, making stochastic exported models reproducible by default.
 
 - Reject one-shot iterators and byte-oriented objects supplied as `spatial_erb`
   pan or layer-gain controls before synthesis, keeping rendered values and result
@@ -203,7 +206,8 @@ All notable changes to this project are documented in this file.
 
 - Account for Griffin-Lim's shared ISTFT boundary frame when deriving automatic
   time geometry, including repeated inputs, so native synthesis reaches the
-  requested duration before final fitting.
+  requested duration before final fitting. A single-frame, single-pass request
+  remains valid because boundary overlap applies only between repeated copies.
 - Keep HiFi-GAN checkpoint loading on `weights_only=True` for every failure path;
   checkpoint decoding errors no longer trigger legacy pickle loading.
 - Preflight MusicNet dependencies and pinned assets before primary synthesis;
@@ -231,10 +235,7 @@ All notable changes to this project are documented in this file.
   profile responses, MusicNet, RAVE, and `output_sr`.
 - Convert extreme duration, repeat, frequency, and harmonic combinations into
   documented `ValueError` failures rather than leaking numeric overflow errors.
-- Remove duplicate choice validators, duplicate FFT test helpers, unused
-  HiFi-GAN configuration attributes, and obsolete resampling implementations.
-- Schedule the ignored low-level `musicnet(batch_size=...)` compatibility
-  argument for removal in 0.3.0; calls continue to emit `DeprecationWarning`.
+- Validate primary and postprocessed audio as finite, non-empty one- or two-dimensional arrays before duration calculations, and enforce each primary method's registered channel count.
 
 ## [0.2.0] - 2026-08-01
 

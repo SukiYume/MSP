@@ -4,32 +4,12 @@ import numpy as np
 import pytest
 from click.testing import CliRunner
 
-from radiosonify._perceptual_config import (
-    PERCEPTUAL_DEFAULT_DURATION,
-    PERCEPTUAL_DEFAULTS,
-)
 from radiosonify.cli import main
 
 
 @pytest.fixture
 def runner():
     return CliRunner()
-
-
-@pytest.mark.parametrize("command_name", ["erb", "spatial-erb"])
-def test_perceptual_low_level_cli_defaults_share_the_engine_source(command_name):
-    command = main.commands[command_name]
-    defaults = {parameter.name: parameter.default for parameter in command.params}
-
-    assert defaults["duration"] == PERCEPTUAL_DEFAULT_DURATION
-    scalar_defaults = {
-        name: value
-        for name, value in PERCEPTUAL_DEFAULTS.items()
-        if name not in {"voice_params", "event_params"}
-    }
-    assert {name: defaults[name] for name in scalar_defaults} == scalar_defaults
-    assert defaults["voice_params"] == ()
-    assert defaults["event_params"] == ()
 
 
 @pytest.fixture
@@ -53,85 +33,98 @@ def layered_file(tmp_path):
     return path
 
 
+def test_cli_has_one_execution_command():
+    assert set(main.commands) == {
+        "sonify",
+        "list-methods",
+        "list-settings",
+        "download-examples",
+    }
+
+
 def test_help_and_version(runner):
     help_result = runner.invoke(main, ["--help"])
     version_result = runner.invoke(main, ["--version"])
 
     assert help_result.exit_code == 0
     assert "RadioSonify" in help_result.output
+    assert "sonify" in help_result.output
     assert version_result.exit_code == 0
-    assert "0.2.0" in version_result.output
+    assert "0.3.0" in version_result.output
+
+
+def test_removed_low_level_commands_are_absent(runner):
+    for command in ("profile", "amplitude", "erb", "spatial-erb", "griffinlim", "hifigan"):
+        result = runner.invoke(main, [command])
+        assert result.exit_code != 0
+        assert "No such command" in result.output
 
 
 def test_list_methods(runner):
     result = runner.invoke(main, ["list-methods"])
 
     assert result.exit_code == 0
-    assert "profile" in result.output
-    assert "griffinlim" in result.output
-    assert "musicnet" in result.output
-    assert "erb" in result.output
-    assert "spatial_erb" in result.output
-    assert "rave" in result.output
+    for name in ("profile", "amplitude", "griffinlim", "hifigan", "erb", "spatial_erb"):
+        assert name in result.output
+    for name in ("musicnet", "rave"):
+        assert name in result.output
+        assert "postprocessor" in result.output
 
 
-def test_profile_and_amplitude_legacy_commands(runner, profile_file, tmp_path):
-    profile_output = tmp_path / "profile.wav"
-    amplitude_output = tmp_path / "amplitude.wav"
-
-    profile_result = runner.invoke(
+@pytest.mark.parametrize("method", ["profile", "amplitude"])
+def test_profile_methods_run_through_unified_command(runner, profile_file, tmp_path, method):
+    output = tmp_path / f"{method}.wav"
+    result = runner.invoke(
         main,
         [
-            "profile",
+            "sonify",
             "--input",
             str(profile_file),
             "--output",
-            str(profile_output),
+            str(output),
             "--duration",
             "0.01",
-            "--no-instrument",
-        ],
-    )
-    amplitude_result = runner.invoke(
-        main,
-        [
-            "amplitude",
-            "--input",
-            str(profile_file),
-            "--output",
-            str(amplitude_output),
-            "--duration",
-            "0.01",
+            "--repeat",
+            "1",
+            "--method",
+            method,
+            "--method-param",
+            "sr=8000",
         ],
     )
 
-    assert profile_result.exit_code == 0, profile_result.output
-    assert amplitude_result.exit_code == 0, amplitude_result.output
-    assert profile_output.is_file()
-    assert amplitude_output.is_file()
+    assert result.exit_code == 0, f"{result.output}\n{result.exception}"
+    assert output.is_file()
 
 
-def test_griffinlim_rebinning_moved_to_shared_preprocessing(runner, spectrum_file, tmp_path):
-    """新脚本通过统一的 --preprocess 表达重分箱。"""
+def test_griffinlim_uses_shared_preprocessing_and_generic_method_settings(
+    runner, spectrum_file, tmp_path
+):
     output = tmp_path / "griffinlim.wav"
     result = runner.invoke(
         main,
         [
-            "griffinlim",
+            "sonify",
             "--input",
             str(spectrum_file),
             "--output",
             str(output),
-            "--sr",
-            "800",
-            "--n-iter",
-            "1",
-            "--n-fft",
-            "32",
+            "--duration",
+            "0.04",
+            "--method",
+            "griffinlim",
             "--preprocess",
-            "time_rebin=8",
+            "time_rebin=10",
             "--preprocess",
             "feature_rebin=16",
+            "--method-param",
+            "sr=800",
+            "--method-param",
+            "n_iter=1",
+            "--method-param",
+            "n_fft=32",
+            "--method-param",
+            "frame_length=0.02",
         ],
     )
 
@@ -139,36 +132,39 @@ def test_griffinlim_rebinning_moved_to_shared_preprocessing(runner, spectrum_fil
     assert output.is_file()
 
 
-def test_griffinlim_legacy_n_mels_alias_routes_to_shared_preprocessing(
-    runner, spectrum_file, tmp_path
+@pytest.mark.parametrize(
+    ("fixture_name", "method", "method_settings"),
+    [
+        ("spectrum_file", "erb", ["sr=8000", "max_freq=3000", "n_bands=4"]),
+        ("layered_file", "spatial_erb", ["sr=8000", "max_freq=3000", "n_bands=4"]),
+    ],
+)
+def test_perceptual_methods_run_through_unified_command(
+    runner, request, tmp_path, fixture_name, method, method_settings
 ):
-    output = tmp_path / "legacy-griffinlim.wav"
-    result = runner.invoke(
-        main,
-        [
-            "griffinlim",
-            "--input",
-            str(spectrum_file),
-            "--output",
-            str(output),
-            "--sr",
-            "800",
-            "--n-iter",
-            "1",
-            "--n-fft",
-            "32",
-            "--n-mels",
-            "16",
-            "--time-rebin",
-            "8",
-        ],
-    )
+    source = request.getfixturevalue(fixture_name)
+    output = tmp_path / f"{method}.wav"
+    arguments = [
+        "sonify",
+        "--input",
+        str(source),
+        "--output",
+        str(output),
+        "--duration",
+        "0.01",
+        "--method",
+        method,
+    ]
+    for setting in method_settings:
+        arguments.extend(("--method-param", setting))
+
+    result = runner.invoke(main, arguments)
 
     assert result.exit_code == 0, f"{result.output}\n{result.exception}"
     assert output.is_file()
 
 
-def test_expected_library_error_is_reported_without_a_traceback(runner, spectrum_file, tmp_path):
+def test_expected_library_error_is_reported_without_traceback(runner, spectrum_file, tmp_path):
     result = runner.invoke(
         main,
         [
@@ -190,107 +186,93 @@ def test_expected_library_error_is_reported_without_a_traceback(runner, spectrum
     assert "Traceback" not in result.output
 
 
-def test_erb_and_spatial_erb_commands(runner, spectrum_file, layered_file, tmp_path):
-    matrix_output = tmp_path / "erb.wav"
-    layered_output = tmp_path / "spatial.wav"
-
-    matrix = runner.invoke(
+@pytest.mark.parametrize(
+    ("option", "setting", "message"),
+    [
+        ("--preprocess", "unknown=8", "unknown preprocessing"),
+        ("--method-param", "unknown=8", "unknown parameter"),
+        ("--preprocess", "scale_statistic", "key=value"),
+    ],
+)
+def test_generic_setting_errors_are_actionable(
+    runner, spectrum_file, tmp_path, option, setting, message
+):
+    result = runner.invoke(
         main,
         [
+            "sonify",
+            "--input",
+            str(spectrum_file),
+            "--output",
+            str(tmp_path / "out.wav"),
+            "--duration",
+            "0.01",
+            "--method",
             "erb",
-            "--input",
-            str(spectrum_file),
-            "--output",
-            str(matrix_output),
-            "--sr",
-            "8000",
-            "--max-freq",
-            "3000",
-            "--duration",
-            "0.01",
-            "--n-bands",
-            "4",
-            "--timbre",
-            "sine",
-        ],
-    )
-    layered = runner.invoke(
-        main,
-        [
-            "spatial-erb",
-            "--input",
-            str(layered_file),
-            "--output",
-            str(layered_output),
-            "--sr",
-            "8000",
-            "--max-freq",
-            "3000",
-            "--duration",
-            "0.01",
-            "--n-bands",
-            "4",
-            "--timbre",
-            "retro_digital",
-        ],
-    )
-
-    assert matrix.exit_code == 0, f"{matrix.output}\n{matrix.exception}"
-    assert layered.exit_code == 0, f"{layered.output}\n{layered.exception}"
-    assert matrix_output.is_file()
-    assert layered_output.is_file()
-
-
-def test_unknown_preprocess_setting_is_rejected(runner, spectrum_file, tmp_path):
-    result = runner.invoke(
-        main,
-        [
-            "griffinlim",
-            "--input",
-            str(spectrum_file),
-            "--output",
-            str(tmp_path / "out.wav"),
-            "--preprocess",
-            "freq_rebin=8",
+            option,
+            setting,
         ],
     )
 
     assert result.exit_code != 0
+    assert message in result.output
 
 
-def test_malformed_preprocess_setting_is_rejected(runner, spectrum_file, tmp_path):
+def test_duplicate_generic_setting_is_rejected(runner, profile_file, tmp_path):
     result = runner.invoke(
         main,
         [
-            "griffinlim",
+            "sonify",
             "--input",
-            str(spectrum_file),
+            str(profile_file),
             "--output",
             str(tmp_path / "out.wav"),
-            "--preprocess",
-            "scale_statistic",
+            "--duration",
+            "0.01",
+            "--method-param",
+            "sr=8000",
+            "--method-param",
+            "sr=16000",
         ],
     )
 
     assert result.exit_code != 0
-    assert "key=value" in result.output
+    assert "repeats setting 'sr'" in result.output
 
 
 @pytest.mark.parametrize(
     ("fixture_name", "extra"),
     [
-        ("profile_file", []),
-        ("spectrum_file", ["--method", "erb"]),
-        ("layered_file", []),
+        ("profile_file", ["--repeat", "1", "--method-param", "sr=8000"]),
+        (
+            "spectrum_file",
+            [
+                "--method",
+                "erb",
+                "--method-param",
+                "sr=8000",
+                "--method-param",
+                "max_freq=3000",
+                "--method-param",
+                "n_bands=4",
+            ],
+        ),
+        (
+            "layered_file",
+            [
+                "--method-param",
+                "sr=8000",
+                "--method-param",
+                "max_freq=3000",
+                "--method-param",
+                "n_bands=4",
+            ],
+        ),
     ],
 )
-def test_unified_sonify_command_covers_every_dimensionality(
-    runner, request, tmp_path, fixture_name, extra
-):
-    """统一入口在 CLI 上和 Python API 一样：选方法、给数据时长、调 speed/repeat。"""
+def test_sonify_command_covers_every_dimensionality(runner, request, tmp_path, fixture_name, extra):
     source = request.getfixturevalue(fixture_name)
     output = tmp_path / f"{fixture_name}.wav"
-
     result = runner.invoke(
         main,
         [
@@ -300,30 +282,25 @@ def test_unified_sonify_command_covers_every_dimensionality(
             "--output",
             str(output),
             "--duration",
-            "0.4",
+            "0.04",
             "--speed",
             "2",
-            "--repeat",
-            "2",
             "--preprocess",
-            "scale_statistic=mad",
+            "scale_statistic='mad'",
             "--preprocess",
-            "clip_percentiles=(5,95)",
+            "clip_percentiles=(5, 95)",
             *extra,
         ],
     )
 
-    assert result.exit_code == 0, f"{result.output} {result.exception}"
+    assert result.exit_code == 0, f"{result.output}\n{result.exception}"
     assert output.is_file()
-    # duration * repeat / speed = 0.4 * 2 / 2
-    assert "0.400 s" in result.output
 
 
-def test_unified_sonify_command_accepts_axis_declarations(runner, tmp_path):
+def test_sonify_command_accepts_axes_and_layer_rebin(runner, tmp_path):
     source = tmp_path / "channels_last.npy"
-    np.save(source, np.random.default_rng(1).random((8, 6, 3)))
+    np.save(source, np.random.default_rng(1).random((8, 6, 4)))
     output = tmp_path / "axes.wav"
-
     result = runner.invoke(
         main,
         [
@@ -333,127 +310,90 @@ def test_unified_sonify_command_accepts_axis_declarations(runner, tmp_path):
             "--output",
             str(output),
             "--duration",
-            "0.2",
+            "0.01",
             "--layer-axis",
             "2",
+            "--preprocess",
+            "layer_rebin=2",
+            "--method-param",
+            "sr=8000",
+            "--method-param",
+            "max_freq=3000",
+            "--method-param",
+            "n_bands=4",
         ],
     )
 
-    assert result.exit_code == 0, f"{result.output} {result.exception}"
+    assert result.exit_code == 0, f"{result.output}\n{result.exception}"
     assert output.is_file()
 
 
-def test_list_settings_documents_the_shared_preprocessing_surface(runner):
-    result = runner.invoke(main, ["list-settings"])
-
-    assert result.exit_code == 0
-    assert "scale_statistic" in result.output
-    assert "nan_policy" in result.output
-    assert "normalization_scope" in result.output
-
-
-def test_input_existence_and_decoder_range_validation(runner, tmp_path):
+def test_missing_input_and_invalid_postprocessor_setting_fail_at_the_boundary(
+    runner, profile_file, tmp_path
+):
     missing = runner.invoke(
         main,
-        ["profile", "--input", str(tmp_path / "missing.npy"), "--output", "out.wav"],
+        [
+            "sonify",
+            "--input",
+            str(tmp_path / "missing.npy"),
+            "--output",
+            str(tmp_path / "out.wav"),
+            "--duration",
+            "1",
+        ],
     )
-    decoder = runner.invoke(
+    invalid_decoder = runner.invoke(
         main,
         [
-            "musicnet",
+            "sonify",
             "--input",
-            str(tmp_path / "missing.wav"),
+            str(profile_file),
             "--output",
-            "out.wav",
-            "--decoder-id",
-            "6",
+            str(tmp_path / "musicnet.wav"),
+            "--duration",
+            "1",
+            "--postprocess",
+            "musicnet",
+            "--postprocess-param",
+            "decoder_id=6",
         ],
     )
 
     assert missing.exit_code != 0
-    assert decoder.exit_code != 0
+    assert "does not exist" in missing.output
+    assert invalid_decoder.exit_code != 0
+    assert "decoder_id" in invalid_decoder.output
 
 
-def test_list_methods_names_the_optional_extra_each_backend_needs(runner):
+def test_list_methods_names_optional_extras(runner):
     result = runner.invoke(main, ["list-methods"])
 
     assert result.exit_code == 0
-    assert "pip install radiosonify[hifigan]" in result.output
-    assert "pip install radiosonify[musicnet]" in result.output
-    assert "pip install radiosonify[rave]" in result.output
-    # Dependency-free methods stay unannotated, so the marker means "extra required".
+    for extra in ("hifigan", "musicnet", "rave"):
+        assert f"pip install radiosonify[{extra}]" in result.output
     erb_line = next(line for line in result.output.splitlines() if line.strip().startswith("erb "))
     assert "pip install" not in erb_line
 
 
-def test_list_settings_prints_every_registered_default(runner):
+def test_list_settings_prints_the_complete_registered_surface(runner):
+    from radiosonify._perceptual_config import EVENT_DEFAULTS, VOICE_DEFAULTS
+    from radiosonify.preprocessing import preprocessing_defaults
     from radiosonify.registry import available_methods, available_postprocessors
 
     result = runner.invoke(main, ["list-settings"])
 
     assert result.exit_code == 0
-    # A registered default the user never sees is a default the user cannot
-    # reproduce; every method and postprocessor value is printed. This is how
-    # the unified API's `instrument: None` becomes visible next to the
-    # low-level `profile_to_wave(instrument="violin")` compatibility default.
-    assert "instrument" in result.output
-    assert "default: None" in result.output
+    for name, value in preprocessing_defaults().items():
+        assert name in result.output
+        assert f"default: {value!r}" in result.output
     for spec in (*available_methods(), *available_postprocessors()):
         for name, value in spec.defaults.items():
-            assert f"{name}" in result.output
+            assert name in result.output
             assert f"default: {value!r}" in result.output
-    assert "(none)" in result.output  # hifigan registers no method parameters
-
-
-def test_griffinlim_command_exposes_every_registered_method_parameter(
-    runner, spectrum_file, tmp_path
-):
-    from radiosonify.registry import resolve_method
-
-    command = main.commands["griffinlim"]
-    options = {parameter.name for parameter in command.params}
-    assert set(resolve_method("griffinlim", "matrix").parameters) <= options
-
-    output = tmp_path / "gl.wav"
-    result = runner.invoke(
-        main,
-        [
-            "griffinlim",
-            "--input",
-            str(spectrum_file),
-            "--output",
-            str(output),
-            "--sr",
-            "8000",
-            "--n-iter",
-            "2",
-            "--n-fft",
-            "512",
-            "--frame-length",
-            "0.02",
-            "--preemphasis",
-            "0.5",
-            "--max-db",
-            "80",
-            "--ref-db",
-            "10",
-        ],
-    )
-
-    assert result.exit_code == 0, f"{result.output} {result.exception}"
-    assert output.is_file()
-
-
-def test_list_settings_expands_the_grouped_perceptual_mappings(runner):
-    from radiosonify._perceptual_config import EVENT_DEFAULTS, VOICE_DEFAULTS
-
-    result = runner.invoke(main, ["list-settings"])
-
-    assert result.exit_code == 0
+    for name, value in (*VOICE_DEFAULTS.items(), *EVENT_DEFAULTS.items()):
+        assert name in result.output
+        assert f"default: {value!r}" in result.output
     assert "voice_params accepts:" in result.output
     assert "event_params accepts:" in result.output
-    # The grouped mappings default to None, so their keys are reachable only
-    # when the discovery command expands them.
-    for name, value in (*VOICE_DEFAULTS.items(), *EVENT_DEFAULTS.items()):
-        assert f"{name}" in result.output
-        assert f"default: {value!r}" in result.output
+    assert "(none)" in result.output

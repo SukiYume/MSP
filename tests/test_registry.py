@@ -81,8 +81,9 @@ def test_method_specs_expose_effective_parameter_names():
     assert hifigan.output_peak is None
 
 
-def test_resolve_method_accepts_public_alias_and_rejects_mismatch():
-    assert resolve_method("profile_to_wave", "profile").name == "profile"
+def test_resolve_method_rejects_removed_alias_and_type_mismatch():
+    with pytest.raises(ValueError, match="unknown method 'profile_to_wave'"):
+        resolve_method("profile_to_wave", "profile")
     with pytest.raises(ValueError, match="does not accept profile"):
         resolve_method("hifigan", "profile")
 

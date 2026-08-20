@@ -6,8 +6,7 @@ import pytest
 import soundfile as sf
 
 import radiosonify as rs
-import radiosonify.api as api_module
-from radiosonify.api import _freeze_provenance_value
+from radiosonify.validation import _freeze_value
 from tests.helpers import dominant_frequency
 
 amplitude_module = importlib.import_module("radiosonify.amplitude")
@@ -15,6 +14,7 @@ erb_module = importlib.import_module("radiosonify.erb")
 griffinlim_module = importlib.import_module("radiosonify.griffinlim")
 hifigan_module = importlib.import_module("radiosonify.hifigan")
 musicnet_module = importlib.import_module("radiosonify.musicnet")
+pipeline_module = importlib.import_module("radiosonify.pipeline")
 
 
 def test_unified_profile_auto_method_uses_physical_duration_and_speed(tmp_path):
@@ -151,21 +151,20 @@ def test_method_type_and_parameter_errors_are_actionable():
 
 
 @pytest.mark.parametrize(
-    ("method", "method_params", "target"),
+    ("method", "method_params", "removed_name"),
     [
-        ("griffinlim", {"n_mels": 8}, "feature_rebin"),
-        ("griffinlim", {"freq_rebin": 8}, "feature_rebin"),
+        ("griffinlim", {"n_mels": 8}, "n_mels"),
+        ("griffinlim", {"freq_rebin": 8}, "freq_rebin"),
         ("hifigan", {"time_rebin": 8}, "time_rebin"),
         ("hifigan", {"time_smoothing": 1.0}, "time_smoothing"),
-        ("erb", {"time_axis": 1}, r"SonificationInput\(time_axis"),
-        ("amplitude", {"time_downsample": 2}, "time_rebin"),
+        ("erb", {"time_axis": 1}, "time_axis"),
+        ("amplitude", {"time_downsample": 2}, "time_downsample"),
     ],
 )
-def test_data_domain_knobs_point_at_their_new_home(method, method_params, target):
-    """曾经在方法层改数据的旋钮全部迁到第一部分，错误信息要指明去处。"""
+def test_removed_method_level_data_controls_are_unknown(method, method_params, removed_name):
     data = np.ones(8) if method == "amplitude" else np.ones((8, 8))
 
-    with pytest.raises(ValueError, match=target):
+    with pytest.raises(ValueError, match=rf"unknown parameter.*{removed_name}"):
         rs.sonify(data, data_duration=1, method=method, method_params=method_params)
 
 
@@ -480,7 +479,7 @@ def test_result_parameter_provenance_is_read_only():
 
 
 def test_numeric_array_provenance_uses_an_irreversible_read_only_buffer():
-    snapshot = api_module._freeze_provenance_value(np.arange(4.0))
+    snapshot = _freeze_value(np.arange(4.0))
 
     with pytest.raises(ValueError):
         snapshot.setflags(write=True)
@@ -648,6 +647,39 @@ def test_preprocess_parameter_errors_fail_before_synthesis(monkeypatch):
         )
 
 
+def test_method_validation_finishes_before_preprocessing(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_module,
+        "_preprocess_validated",
+        lambda *args, **kwargs: pytest.fail("preprocessing must not run"),
+    )
+
+    with pytest.raises(ValueError, match="freq"):
+        rs.sonify(
+            np.ones(16),
+            data_duration=1,
+            method="amplitude",
+            method_params={"freq": -1},
+        )
+
+
+def test_primary_audio_must_match_the_registered_channel_contract(monkeypatch):
+    monkeypatch.setattr(
+        amplitude_module,
+        "amplitude_modulate",
+        lambda *args, **kwargs: (np.zeros((8_000, 2)), 8_000),
+    )
+
+    with pytest.raises(RuntimeError, match=r"amplitude.*produced 2 channel.*declares 1"):
+        rs.sonify(
+            np.ones(16),
+            data_duration=1,
+            method="amplitude",
+            repeat=1,
+            method_params={"sr": 8_000},
+        )
+
+
 def test_result_equality_and_hashing_use_identity_without_array_errors():
     kwargs = {
         "data_duration": 0.01,
@@ -662,14 +694,14 @@ def test_result_equality_and_hashing_use_identity_without_array_errors():
 
 
 def test_without_postprocess_duration_is_fitted_once(monkeypatch):
-    original = api_module.fit_audio_duration
+    original = pipeline_module.fit_audio_duration
     calls = []
 
     def counted_fit(*args, **kwargs):
         calls.append((args, kwargs))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(api_module, "fit_audio_duration", counted_fit)
+    monkeypatch.setattr(pipeline_module, "fit_audio_duration", counted_fit)
     rs.sonify(
         np.linspace(0, 1, 16),
         data_duration=0.01,
@@ -777,7 +809,34 @@ def test_unified_griffinlim_repeat_shares_istft_boundary_frames():
 
     assert result.method_native_samples == 240
     assert result.method_time_scale == pytest.approx(1)
-    assert len(result.audio) == 240
+
+
+def test_single_griffinlim_frame_is_valid_when_the_timeline_is_not_repeated(monkeypatch):
+    received = []
+
+    def fake_griffinlim(data, output, **params):
+        del output, params
+        received.append(data.shape)
+        return np.zeros(80), 8_000
+
+    monkeypatch.setattr(griffinlim_module, "griffinlim", fake_griffinlim)
+    result = rs.sonify(
+        np.ones((4, 8)),
+        data_duration=0.01,
+        method="griffinlim",
+        repeat=1,
+        preprocess_params={"time_rebin": 1, "feature_rebin": 8},
+        method_params={
+            "sr": 8_000,
+            "n_iter": 1,
+            "n_fft": 16,
+            "frame_length": 0.001,
+        },
+    )
+
+    assert received == [(1, 8)]
+    assert result.output_duration == pytest.approx(0.01)
+    assert len(result.audio) == 80
 
 
 def test_musicnet_preflight_failure_happens_before_primary_synthesis(monkeypatch):
@@ -785,6 +844,11 @@ def test_musicnet_preflight_failure_happens_before_primary_synthesis(monkeypatch
         amplitude_module,
         "amplitude_modulate",
         lambda *args, **kwargs: pytest.fail("primary synthesis should not run"),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "_preprocess_validated",
+        lambda *args, **kwargs: pytest.fail("preprocessing should not run"),
     )
 
     def unavailable(**params):
@@ -795,6 +859,79 @@ def test_musicnet_preflight_failure_happens_before_primary_synthesis(monkeypatch
 
     with pytest.raises(ImportError, match="runtime unavailable"):
         rs.sonify(np.ones(16), data_duration=1, postprocess="musicnet")
+
+
+def test_musicnet_receives_planned_primary_length_before_preprocessing(monkeypatch):
+    monkeypatch.setattr(
+        amplitude_module,
+        "amplitude_modulate",
+        lambda *args, **kwargs: pytest.fail("primary synthesis should not run"),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "_preprocess_validated",
+        lambda *args, **kwargs: pytest.fail("preprocessing should not run"),
+    )
+    received = {}
+
+    def reject_short(**params):
+        received.update(params)
+        raise ValueError("planned MusicNet input is too short")
+
+    monkeypatch.setattr(musicnet_module, "_preflight_musicnet", reject_short)
+
+    with pytest.raises(ValueError, match="planned MusicNet input is too short"):
+        rs.sonify(
+            np.ones(16),
+            data_duration=0.02,
+            repeat=1,
+            method="amplitude",
+            method_params={"sr": 48_000},
+            postprocess="musicnet",
+        )
+
+    assert received["input_channels"] == 1
+    assert received["input_sample_rate"] == 48_000
+    assert received["input_samples"] == 960
+
+
+def test_layer_rebin_is_planned_before_spatial_control_validation(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_module,
+        "_preprocess_validated",
+        lambda *args, **kwargs: pytest.fail("preprocessing should not run"),
+    )
+
+    with pytest.raises(ValueError, match=r"pan_positions.*two value|pan_positions.*2"):
+        rs.sonify(
+            np.ones((4, 8, 8)),
+            data_duration=1,
+            method="spatial_erb",
+            preprocess_params={"layer_rebin": 2},
+            method_params={"pan_positions": (-1.0, -0.3, 0.3, 1.0)},
+        )
+
+
+def test_spatial_method_receives_the_planned_layer_count(monkeypatch):
+    spatial_module = importlib.import_module("radiosonify.spatial")
+    received = []
+
+    def fake_spatial(data, output, duration, **params):
+        del output, params
+        received.append(data.shape)
+        return np.zeros((round(8_000 * duration), 2)), 8_000
+
+    monkeypatch.setattr(spatial_module, "spatial_sonify", fake_spatial)
+    result = rs.sonify(
+        np.arange(256.0).reshape(4, 8, 8),
+        data_duration=0.01,
+        method="spatial_erb",
+        preprocess_params={"layer_rebin": 2},
+        method_params={"sr": 8_000, "pan_positions": (-1.0, 1.0)},
+    )
+
+    assert received == [(2, 8, 8)]
+    assert result.preprocess_params["layer_rebin"] == 2
 
 
 def test_griffinlim_rejects_feature_bins_above_fft_limit_before_synthesis(
@@ -902,7 +1039,7 @@ def test_unified_spatial_api_rejects_one_shot_control_iterators(name):
     ],
 )
 def test_freeze_provenance_value_records_containers_by_value(value, expected):
-    frozen = _freeze_provenance_value(value)
+    frozen = _freeze_value(value)
 
     assert frozen == expected
     # Text stays text; recursing into it would turn a choice into characters.
@@ -910,7 +1047,7 @@ def test_freeze_provenance_value_records_containers_by_value(value, expected):
 
 
 def test_freeze_provenance_value_keeps_nested_mappings_read_only():
-    frozen = _freeze_provenance_value({"voice_params": UserList([{"detune_cents": 10.0}])})
+    frozen = _freeze_value({"voice_params": UserList([{"detune_cents": 10.0}])})
 
     nested = frozen["voice_params"][0]
     with pytest.raises(TypeError):
@@ -940,6 +1077,28 @@ def test_grouped_method_parameters_are_recorded_at_full_resolution():
     assert supplied.method_params["voice_params"]["detune_cents"] == VOICE_DEFAULTS["detune_cents"]
     assert dict(omitted.method_params["voice_params"]) == dict(VOICE_DEFAULTS)
     assert dict(omitted.method_params["event_params"]) == dict(EVENT_DEFAULTS)
+
+
+def test_resolved_plan_recursively_freezes_grouped_parameters():
+    planning_module = importlib.import_module("radiosonify.planning")
+    plan = planning_module.resolve_sonification_plan(
+        np.ones((8, 8)),
+        data_duration=0.1,
+        data_type=None,
+        method="erb",
+        speed=1.0,
+        repeat=1,
+        preserve_pitch=False,
+        output_sr=None,
+        preprocess_params=None,
+        method_params={"voice_params": {"fm_index": 0.5}},
+        postprocess=None,
+        postprocess_params=None,
+        output=None,
+    )
+
+    with pytest.raises(TypeError):
+        plan.method_params["voice_params"]["fm_index"] = 1.0
 
 
 def test_misspelled_grouped_key_fails_before_synthesis_starts(monkeypatch):

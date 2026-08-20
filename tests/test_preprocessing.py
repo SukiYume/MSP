@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import radiosonify as rs
-from radiosonify.core import normalize
+from radiosonify.array_ops import normalize
 from radiosonify.preprocessing import _resize_axis
 
 
@@ -394,6 +394,34 @@ def test_normalization_scope_defaults_by_dimensionality():
 def test_per_layer_scope_is_rejected_for_lower_dimensional_data():
     with pytest.raises(ValueError, match="requires 3D"):
         rs.preprocess(np.arange(16.0).reshape(4, 4), normalization_scope="per_layer")
+
+
+def test_layer_rebin_uses_ordered_area_averaging_before_normalization():
+    data = np.arange(32.0).reshape(4, 4, 2)
+    rebinned = rs.preprocess(
+        data,
+        layer_rebin=2,
+        baseline_operation=None,
+        clip_percentiles=None,
+        normalization_scope="global",
+    )
+    expected = normalize(_resize_axis(data, 2, axis=0))
+
+    assert rebinned.shape == (2, 4, 2)
+    np.testing.assert_allclose(rebinned, expected)
+
+
+@pytest.mark.parametrize(
+    ("data", "layer_rebin", "message"),
+    [
+        (np.ones((4, 4)), 2, "only supported for 3D"),
+        (np.ones((4, 4, 4)), "auto", "does not support 'auto'"),
+        (np.ones((2, 4, 4)), 3, "cannot exceed input layer count"),
+    ],
+)
+def test_layer_rebin_rejects_ambiguous_or_expansive_requests(data, layer_rebin, message):
+    with pytest.raises(ValueError, match=message):
+        rs.preprocess(data, layer_rebin=layer_rebin)
 
 
 # ---------- R2-7 共享时间平滑 ----------

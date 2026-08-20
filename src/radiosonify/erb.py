@@ -16,7 +16,7 @@ from ._perceptual import (
     mel_frequencies,
 )
 from ._perceptual_config import PERCEPTUAL_DEFAULT_DURATION, PERCEPTUAL_DEFAULTS
-from .core import _wav_output_path, save_audio
+from .audio_io import _wav_output_path, save_audio
 from .preprocessing import _as_normalized_array
 
 

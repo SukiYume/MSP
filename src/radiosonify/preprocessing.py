@@ -2,7 +2,7 @@
 
 固定流水线顺序（每一步都可关闭，但顺序不可改）::
 
-    重分箱 -> 基线校正 -> 逐通道尺度归一 -> 分位裁剪 -> 重复 -> 时间平滑 -> 归一化
+    层/时间/特征重分箱 -> 基线校正 -> 逐通道尺度归一 -> 分位裁剪 -> 重复 -> 时间平滑 -> 归一化
 
 重分箱排在最前是实测结论，不是习惯。在真实 FRB 动态谱（FRB180301，
 28346x4096 -> 2048x512）上对比"先分箱后校正"与"先校正后分箱"：
@@ -29,16 +29,18 @@ from typing import Any
 
 import numpy as np
 
-from .core import (
+from .array_ops import (
     _MAD_TO_GAUSSIAN_SIGMA,
+    _rebin_axis,
+)
+from .inputs import DataType, infer_data_type, parse_data_type
+from .validation import (
     _as_real_array,
     _choice,
     _merge_settings,
     _positive_float,
     _positive_int,
-    _rebin_axis,
 )
-from .inputs import DataType, infer_data_type, parse_data_type
 
 _BASELINE_OPERATIONS = {"subtract", "divide"}
 _BASELINE_STATISTICS = {"mean", "median"}
@@ -50,6 +52,7 @@ _DEFAULTS: Mapping[str, Any] = MappingProxyType(
     {
         "time_rebin": None,
         "feature_rebin": None,
+        "layer_rebin": None,
         "baseline_operation": "subtract",
         "baseline_statistic": "median",
         "baseline_axis": "auto",
@@ -158,8 +161,13 @@ def resolve_preprocess_params(
 
     params["time_rebin"] = _resolve_rebin(params["time_rebin"], name="time_rebin")
     params["feature_rebin"] = _resolve_rebin(params["feature_rebin"], name="feature_rebin")
+    params["layer_rebin"] = _resolve_rebin(params["layer_rebin"], name="layer_rebin")
     if params["feature_rebin"] is not None and ndim == 1:
         raise ValueError("feature_rebin is only supported for 2D or 3D data")
+    if params["layer_rebin"] == "auto":
+        raise ValueError("layer_rebin does not support 'auto'; supply a target layer count")
+    if params["layer_rebin"] is not None and ndim != 3:
+        raise ValueError("layer_rebin is only supported for 3D layered data")
     params["baseline_operation"] = _optional_choice(
         params["baseline_operation"],
         name="baseline_operation",
@@ -443,18 +451,23 @@ def _preprocess_validated(
         )
 
 
-def _run_pipeline(
+def _resize_scientific_axes(
     data: np.ndarray,
     params: Mapping[str, Any],
     *,
-    repeat: int,
-    repeat_overlap: int,
     nan_aware: bool,
 ) -> np.ndarray:
+    """Apply explicit layer, time, and feature geometry in canonical order."""
     time_axis = _time_axis_for(data.ndim)
     feature_axis = None if data.ndim == 1 else data.ndim - 1
-
-    working = np.array(data, dtype=np.float64, copy=True)
+    working = data
+    if params["layer_rebin"] is not None:
+        target_layers = params["layer_rebin"]
+        if target_layers > working.shape[0]:
+            raise ValueError(
+                f"layer_rebin ({target_layers}) cannot exceed input layer count ({working.shape[0]})"
+            )
+        working = _rebin_axis(working, target_layers, axis=0, nan_aware=nan_aware)
     if params["time_rebin"] is not None:
         working = _resize_axis(
             working,
@@ -471,6 +484,17 @@ def _run_pipeline(
             axis=feature_axis,
             nan_aware=nan_aware,
         )
+    return working
+
+
+def _calibrate_array(
+    data: np.ndarray,
+    params: Mapping[str, Any],
+    *,
+    nan_aware: bool,
+) -> np.ndarray:
+    """Apply baseline and per-channel scale calibration."""
+    working = data
 
     if params["baseline_operation"] is not None:
         working = _baseline_correct(
@@ -487,14 +511,66 @@ def _run_pipeline(
             axis=params["baseline_axis"],
             nan_aware=nan_aware,
         )
+    return working
 
-    if params["clip_percentiles"] is not None:
-        percentile = np.nanpercentile if nan_aware else np.percentile
-        lower, upper = percentile(working, params["clip_percentiles"])
-        # 稀疏轮廓的上下分位点可能都落在同一个背景值上。此时强行裁剪会删掉
-        # 唯一的脉冲，因此保留校正结果，再由常量安全的 min-max 归一化处理。
-        if np.isfinite(lower) and np.isfinite(upper) and upper > lower:
-            np.clip(working, lower, upper, out=working)
+
+def _clip_array(
+    data: np.ndarray,
+    percentiles: tuple[float, float] | None,
+    *,
+    nan_aware: bool,
+) -> np.ndarray:
+    """Apply a global percentile interval when it has non-zero width."""
+    if percentiles is None:
+        return data
+    percentile = np.nanpercentile if nan_aware else np.percentile
+    lower, upper = percentile(data, percentiles)
+    if np.isfinite(lower) and np.isfinite(upper) and upper > lower:
+        np.clip(data, lower, upper, out=data)
+    return data
+
+
+def _smooth_time_axis(
+    data: np.ndarray,
+    sigma: float | None,
+    *,
+    time_axis: int,
+    nan_aware: bool,
+) -> np.ndarray:
+    """Smooth the canonical time axis while retaining a propagated NaN mask."""
+    if sigma is None:
+        return data
+    from scipy.ndimage import gaussian_filter1d
+
+    if not nan_aware:
+        return gaussian_filter1d(data, sigma=sigma, axis=time_axis, mode="reflect")
+    mask = np.isnan(data)
+    working = data
+    if mask.any():
+        filler = np.nanmedian(working, axis=time_axis, keepdims=True)
+        working = np.where(mask, np.nan_to_num(filler), working)
+    working = gaussian_filter1d(working, sigma=sigma, axis=time_axis, mode="reflect")
+    working[mask] = np.nan
+    return working
+
+
+def _run_pipeline(
+    data: np.ndarray,
+    params: Mapping[str, Any],
+    *,
+    repeat: int,
+    repeat_overlap: int,
+    nan_aware: bool,
+) -> np.ndarray:
+    time_axis = _time_axis_for(data.ndim)
+    working = np.array(data, dtype=np.float64, copy=True)
+    working = _resize_scientific_axes(working, params, nan_aware=nan_aware)
+    working = _calibrate_array(working, params, nan_aware=nan_aware)
+    working = _clip_array(
+        working,
+        params["clip_percentiles"],
+        nan_aware=nan_aware,
+    )
 
     tiled_before_smoothing = params["time_smoothing"] is not None and repeat > 1
     if tiled_before_smoothing:
@@ -505,30 +581,12 @@ def _run_pipeline(
             overlap=repeat_overlap,
         )
 
-    if params["time_smoothing"] is not None:
-        from scipy.ndimage import gaussian_filter1d
-
-        if nan_aware:
-            # 高斯核会把一个 NaN 抹到整个邻域。先用通道中位数补洞再平滑，
-            # 平滑后恢复原来的掩码，掩掉的样本仍由归一化后的填零处理。
-            mask = np.isnan(working)
-            if mask.any():
-                filler = np.nanmedian(working, axis=time_axis, keepdims=True)
-                working = np.where(mask, np.nan_to_num(filler), working)
-            working = gaussian_filter1d(
-                working,
-                sigma=params["time_smoothing"],
-                axis=time_axis,
-                mode="reflect",
-            )
-            working[mask] = np.nan
-        else:
-            working = gaussian_filter1d(
-                working,
-                sigma=params["time_smoothing"],
-                axis=time_axis,
-                mode="reflect",
-            )
+    working = _smooth_time_axis(
+        working,
+        params["time_smoothing"],
+        time_axis=time_axis,
+        nan_aware=nan_aware,
+    )
 
     # ``working`` is owned by this function, including every resize result.
     # Public ``preprocess`` therefore continues not to modify caller input.
@@ -553,6 +611,7 @@ def preprocess(
     data_type: DataType | str | None = None,
     time_rebin: int | None = _DEFAULTS["time_rebin"],
     feature_rebin: int | None = _DEFAULTS["feature_rebin"],
+    layer_rebin: int | None = _DEFAULTS["layer_rebin"],
     repeat: int = 1,
     baseline_operation: str | None = _DEFAULTS["baseline_operation"],
     baseline_statistic: str = _DEFAULTS["baseline_statistic"],
@@ -575,6 +634,7 @@ def preprocess(
         time_rebin: 时间轴目标格数。缩小用等宽面积平均，放大用 bin 中心线性
             插值，都不要求整除。``None`` 保持原尺寸。
         feature_rebin: 特征轴目标格数，仅 2-D/3-D 可用。
+        layer_rebin: 三维数据的目标层数，使用有序面积平均降维；``None`` 保持层数。
         repeat: 沿时间轴重复数据的遍数。
         baseline_operation: ``'subtract'`` 校正加性基线，``'divide'`` 校正乘性增益，
             ``None`` 关闭基线校正。
@@ -610,6 +670,7 @@ def preprocess(
         {
             "time_rebin": time_rebin,
             "feature_rebin": feature_rebin,
+            "layer_rebin": layer_rebin,
             "baseline_operation": baseline_operation,
             "baseline_statistic": baseline_statistic,
             "baseline_axis": baseline_axis,

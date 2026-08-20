@@ -25,13 +25,14 @@ jobs:
           python-version: "3.13"
 
       - name: Install lint tools
-        run: python -m pip install "mypy>=1.10" "ruff>=0.4"
+        run: python -m pip install "mypy>=1.10" "ruff>=0.4" "vulture>=2.11"
 
       - name: Check lint and formatting
         run: |
           python -m ruff check src tests examples
           python -m ruff format --check src tests examples
           python -m mypy
+          python -m vulture
 
   test:
     runs-on: ubuntu-latest
@@ -56,7 +57,7 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Run core test suite
-        run: python -m pytest -q
+        run: python -m pytest -q --cov=radiosonify --cov-report=term-missing --cov-fail-under=90
 
   optional-model-contracts:
     runs-on: ubuntu-latest
@@ -80,6 +81,7 @@ jobs:
           python -m pytest -q
           tests/test_hifigan.py
           tests/test_musicnet.py
+          tests/test_rave.py
           tests/test_vendored_models.py
 
   minimum-huggingface-hub:
@@ -125,6 +127,7 @@ jobs:
           python -m twine check dist/*
           python - <<'PY'
           import glob
+          import tarfile
           import zipfile
 
           wheel = glob.glob("dist/*.whl")
@@ -140,11 +143,36 @@ jobs:
           assert b"MIT License" in payload
           assert b"Attribution-NonCommercial 4.0 International" in payload
           assert any(name.endswith("radiosonify/cli.py") for name in names)
+          for module in (
+              "planning.py",
+              "pipeline.py",
+              "validation.py",
+              "array_ops.py",
+              "audio_io.py",
+              "runtime.py",
+          ):
+              assert any(name.endswith(f"radiosonify/{module}") for name in names)
+          assert not any(name.endswith("radiosonify/core.py") for name in names)
+
+          sdist = glob.glob("dist/*.tar.gz")
+          assert len(sdist) == 1, sdist
+          with tarfile.open(sdist[0]) as archive:
+              source_names = archive.getnames()
+          for document in (
+              "CHANGELOG.md",
+              "CONTRIBUTING.md",
+              "MODEL_ASSETS.md",
+              "README.md",
+              "README_CN.md",
+              "THIRD_PARTY_NOTICES.md",
+          ):
+              assert any(name.endswith(f"/{document}") for name in source_names)
+          assert not any(name.endswith("/src/radiosonify/core.py") for name in source_names)
           PY
 
       - name: Install the wheel in a clean environment
         run: |
           python -m venv "$RUNNER_TEMP/wheel-smoke"
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install dist/*.whl
-          "$RUNNER_TEMP/wheel-smoke/bin/python" -c "import radiosonify; assert radiosonify.__version__ == '0.2.0'"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -c "import radiosonify; assert radiosonify.__version__ == '0.3.0'"
           "$RUNNER_TEMP/wheel-smoke/bin/radiosonify" list-methods
