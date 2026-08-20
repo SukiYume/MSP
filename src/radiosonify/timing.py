@@ -116,6 +116,27 @@ def _fix_sample_count(audio: np.ndarray, target_samples: int) -> np.ndarray:
     return np.pad(audio, padding)
 
 
+def _phase_vocoder_stretch(
+    audio: np.ndarray,
+    rate: float,
+    *,
+    n_fft: int,
+) -> np.ndarray:
+    """Time-stretch librosa-layout audio without its deprecated wrapper arguments."""
+    import librosa
+
+    hop_length = max(1, n_fft // 4)
+    spectrum = librosa.stft(audio, n_fft=n_fft, hop_length=hop_length)
+    stretched_spectrum = librosa.phase_vocoder(spectrum, rate=rate)
+    target_samples = round(audio.shape[-1] / rate)
+    return librosa.istft(
+        stretched_spectrum,
+        hop_length=hop_length,
+        dtype=audio.dtype,
+        length=target_samples,
+    )
+
+
 def _polyphase_resample(
     data: np.ndarray,
     ratio: Fraction,
@@ -204,19 +225,16 @@ def fit_audio_duration(
         )
 
     if preserve_pitch:
-        import librosa
-
         rate = len(data) / target_samples
         # 短瞬变若仍用 2048 点窗会被大量填零；这里选不超过输入长度的 2 次幂窗。
         n_fft = min(2048, 1 << (len(data).bit_length() - 1))
         # librosa 把最后一轴当时间；MSP 对外统一使用 soundfile 的
         # samples x channels 布局，因此多声道时在边界转置一次。
         librosa_input = data if data.ndim == 1 else data.T
-        transformed = librosa.effects.time_stretch(
+        transformed = _phase_vocoder_stretch(
             librosa_input.astype(np.float32),
-            rate=rate,
+            rate,
             n_fft=n_fft,
-            hop_length=max(1, n_fft // 4),
         )
         if data.ndim == 2:
             transformed = transformed.T
