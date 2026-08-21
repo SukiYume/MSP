@@ -335,7 +335,16 @@ raw_burst = rs.load_example("raw_burst")
 parkes_burst = rs.load_example("parkes_burst")
 ```
 
-Example arrays, HiFi-GAN weights, and MusicNet checkpoints come from the pinned [`TorchLight/radiosonify`](https://huggingface.co/TorchLight/radiosonify) revision stored in `radiosonify.hub.REVISION`. Assets download on first use into `~/.cache/radiosonify`; `RADIOSONIFY_CACHE_DIR` selects another cache directory. Analytic `profile` instrument responses are generated locally and cached alongside downloaded assets. [MODEL_ASSETS.md](MODEL_ASSETS.md) records origins, transformations, verification history, and license scope.
+Example arrays, HiFi-GAN weights, and MusicNet checkpoints come from the pinned [`TorchLight/radiosonify`](https://huggingface.co/TorchLight/radiosonify) revision stored in `radiosonify.hub.REVISION`. Assets download on first use into `~/.cache/radiosonify`; `RADIOSONIFY_CACHE_DIR` selects another cache directory. Analytic `profile` instrument responses are generated locally and cached alongside downloaded assets.
+
+| Resource | Provenance and use |
+|---|---|
+| Example arrays and `Burst-wirfi.wav` | Small API demonstrations retained from the original MSP project under MIT; scientific releases should preserve and cite their own input provenance. |
+| HiFi-GAN config and checkpoint | Universal V1 architecture and base checkpoint from [`jik876/hifi-gan`](https://github.com/jik876/hifi-gan), followed by 500k MSP fine-tuning steps on symphonic recordings; the historical corpus has limited training-data-level provenance. |
+| MusicNet checkpoints | Official pretrained archive from Facebook Research's [A Universal Music Translation Network](https://github.com/facebookresearch/music-translation), covered by CC BY-NC 4.0 and its non-commercial-use condition. |
+| RAVE model | A trusted TorchScript export supplied by the user, with provenance and license recorded for that model. |
+
+The HiFi-GAN adapter resizes the preprocessed feature axis to 80 bins, restores the resized matrix to `[0, 1]`, estimates its histogram mode `m`, and applies `12 * (x + 0.6 - m) - 10.5`, clipped to `[-11, 1.6]`. The result records `m` in `method_params`. [Third-party notices and asset provenance](THIRD_PARTY_NOTICES.md) provide the complete component licenses, verification history, model safety guidance, and source links.
 
 ## Project layout
 
@@ -347,6 +356,8 @@ Example arrays, HiFi-GAN weights, and MusicNet checkpoints come from the pinned 
 | `src/radiosonify/_perceptual.py`, `_voices.py`, `_events.py` | Shared perceptual synthesis, sustained timbres, palettes, and transient events |
 | `src/radiosonify/musicnet.py`, `rave.py` | Optional audio postprocessors and their runtime contracts |
 | `src/radiosonify/timing.py`, `audio_io.py`, `hub.py` | Duration fitting, output conditioning, WAV writing, and pinned assets |
+| `src/radiosonify/validation.py`, `array_ops.py`, `registry.py`, `runtime.py` | Shared validation, generic array transforms, capability registration, and optional runtime support |
+| `src/radiosonify/models/` | Checkpoint-compatible vendored inference definitions and adjacent licenses |
 | `tests/`, `examples/`, `assets/` | Regression tests, runnable examples, and project artwork |
 
 ## Development
@@ -364,7 +375,11 @@ python -m build
 python -m twine check dist/*
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) describes module boundaries, optional-backend tests, release validation, and the pull request checklist. [CHANGELOG.md](CHANGELOG.md) records each release.
+Changes to neural adapters or vendored inference definitions should also run `python -m pytest -q tests/test_hifigan.py tests/test_musicnet.py tests/test_rave.py tests/test_vendored_models.py`.
+
+Keep scientific resizing, baseline correction, clipping, smoothing, and normalization in `preprocessing.py`; resolve public execution policy in `planning.py`; execute validated plans in `pipeline.py`. Add regression tests for behavior changes, update both READMEs and [CHANGELOG.md](CHANGELOG.md) for public changes, and keep generated audio, downloaded checkpoints, and observation data outside the repository.
+
+Checkpoint-compatible definitions under `src/radiosonify/models/` retain upstream parameter names, tensor shapes, license headers, and the policies in their `VENDORED.md` files. Asset changes should update [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), the adjacent licenses, and the Hugging Face model card together. Release validation builds both distributions, runs Twine checks, installs the wheel in a clean environment, exercises `radiosonify list-methods`, and verifies that both license texts are packaged.
 
 ## Citation and license
 

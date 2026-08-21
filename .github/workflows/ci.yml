@@ -160,8 +160,6 @@ jobs:
               source_names = archive.getnames()
           for document in (
               "CHANGELOG.md",
-              "CONTRIBUTING.md",
-              "MODEL_ASSETS.md",
               "README.md",
               "README_CN.md",
               "THIRD_PARTY_NOTICES.md",

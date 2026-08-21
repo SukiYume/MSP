@@ -79,9 +79,7 @@ include = [
     "examples",
     "assets",
     "CHANGELOG.md",
-    "CONTRIBUTING.md",
     "LICENSE",
-    "MODEL_ASSETS.md",
     "README_CN.md",
     "THIRD_PARTY_NOTICES.md",
 ]

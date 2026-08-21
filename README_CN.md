@@ -335,7 +335,16 @@ raw_burst = rs.load_example("raw_burst")
 parkes_burst = rs.load_example("parkes_burst")
 ```
 
-示例数组、HiFi-GAN 权重和 MusicNet checkpoint 来自固定 revision 的 [`TorchLight/radiosonify`](https://huggingface.co/TorchLight/radiosonify)，revision 存储在 `radiosonify.hub.REVISION`。资产在首次使用时下载到 `~/.cache/radiosonify`，`RADIOSONIFY_CACHE_DIR` 可选择其他缓存目录。`profile` 的解析乐器响应在本地生成，并与下载资产共用缓存目录。[MODEL_ASSETS.md](MODEL_ASSETS.md) 记录来源、转换、核验历史和许可证范围。
+示例数组、HiFi-GAN 权重和 MusicNet checkpoint 来自固定 revision 的 [`TorchLight/radiosonify`](https://huggingface.co/TorchLight/radiosonify)，revision 存储在 `radiosonify.hub.REVISION`。资产在首次使用时下载到 `~/.cache/radiosonify`，`RADIOSONIFY_CACHE_DIR` 可选择其他缓存目录。`profile` 的解析乐器响应在本地生成，并与下载资产共用缓存目录。
+
+| 资源 | 来源与用途 |
+|---|---|
+| 示例数组与 `Burst-wirfi.wav` | 原始 MSP 项目保留的小型 API 示例，采用 MIT 许可；科学发布应保存并引用实际输入数据的来源。 |
+| HiFi-GAN 配置与 checkpoint | 基于 [`jik876/hifi-gan`](https://github.com/jik876/hifi-gan) 的 Universal V1 架构和基础 checkpoint，随后由 MSP 使用交响乐录音训练 500k 步；历史语料的训练数据级来源记录有限。 |
+| MusicNet checkpoint | 来自 Facebook Research [A Universal Music Translation Network](https://github.com/facebookresearch/music-translation) 的官方预训练包，采用带非商业用途条件的 CC BY-NC 4.0。 |
+| RAVE 模型 | 用户提供的可信 TorchScript 文件，其来源和许可证随具体模型记录。 |
+
+HiFi-GAN 适配器先把完成预处理的特征轴调整为 80 个频带，将调整后的矩阵恢复到 `[0, 1]`，估计直方图众数 `m`，再计算 `12 * (x + 0.6 - m) - 10.5` 并裁剪到 `[-11, 1.6]`。结果通过 `method_params` 记录 `m`。[第三方声明与资产来源](THIRD_PARTY_NOTICES.md)提供完整的组件许可证、核验历史、模型安全说明和来源链接。
 
 ## 项目结构
 
@@ -347,6 +356,8 @@ parkes_burst = rs.load_example("parkes_burst")
 | `src/radiosonify/_perceptual.py`、`_voices.py`、`_events.py` | 共享感知合成、持续音色、音色组合与瞬态事件 |
 | `src/radiosonify/musicnet.py`、`rave.py` | 可选音频后处理器及其运行契约 |
 | `src/radiosonify/timing.py`、`audio_io.py`、`hub.py` | 时长拟合、输出整形、WAV 写入与固定资产 |
+| `src/radiosonify/validation.py`、`array_ops.py`、`registry.py`、`runtime.py` | 共享校验、通用数组变换、能力注册与可选运行环境支持 |
+| `src/radiosonify/models/` | 与 checkpoint 兼容的 vendored 推理定义及相邻许可证 |
 | `tests/`、`examples/`、`assets/` | 回归测试、可运行示例和项目图像 |
 
 ## 开发
@@ -364,7 +375,11 @@ python -m build
 python -m twine check dist/*
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) 介绍模块边界、可选后端测试、发行验证和 Pull Request 检查清单。[CHANGELOG.md](CHANGELOG.md) 记录各版本变更。
+修改神经模型适配器或 vendored 推理定义时，还应运行 `python -m pytest -q tests/test_hifigan.py tests/test_musicnet.py tests/test_rave.py tests/test_vendored_models.py`。
+
+科学数据的尺寸调整、基线校正、裁剪、平滑和归一化集中在 `preprocessing.py`，公共执行策略在 `planning.py` 解析，`pipeline.py` 执行完成校验的计划。行为变更需要补充回归测试，公共变化需要同步更新两份 README 和 [CHANGELOG.md](CHANGELOG.md)，生成音频、下载的 checkpoint 与观测数据保存在仓库外。
+
+`src/radiosonify/models/` 中与 checkpoint 兼容的定义保留上游参数名、张量形状、许可证头和各自 `VENDORED.md` 中的维护规则。资产变化应同步更新 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)、相邻许可证与 Hugging Face 模型卡。发行验证会构建两种发行包、运行 Twine 检查、在全新环境安装 wheel、执行 `radiosonify list-methods`，并核对两份许可证文本均已打包。
 
 ## 引用与许可证
 
